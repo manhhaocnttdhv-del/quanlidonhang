@@ -1,0 +1,102 @@
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\OrderController;
+use App\Http\Controllers\DispatchController;
+use App\Http\Controllers\WarehouseController;
+use App\Http\Controllers\DeliveryController;
+use App\Http\Controllers\TrackingController;
+use App\Http\Controllers\ShippingFeeController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\CodReconciliationController;
+use App\Http\Controllers\DriverController;
+use App\Http\Controllers\RouteController;
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+*/
+
+use App\Http\Controllers\Auth\LoginController;
+
+Route::get('/', function () {
+    return redirect()->route('admin.dashboard');
+});
+
+// Authentication Routes
+Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
+Route::post('/login', [LoginController::class, 'login']);
+Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
+
+// Admin Routes
+Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
+    // Dashboard
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    
+    // Customers
+    Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
+    Route::get('/customers/create', [CustomerController::class, 'create'])->name('customers.create');
+    Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');
+    Route::get('/customers/{id}', [CustomerController::class, 'show'])->name('customers.show');
+    Route::get('/customers/{id}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
+    Route::put('/customers/{id}', [CustomerController::class, 'update'])->name('customers.update');
+    
+    // Orders
+    Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
+    Route::get('/orders/create', [OrderController::class, 'create'])->name('orders.create');
+    Route::post('/orders', [OrderController::class, 'store'])->name('orders.store');
+    Route::get('/orders/{id}', [OrderController::class, 'show'])->name('orders.show');
+    Route::get('/orders/{id}/edit', [OrderController::class, 'edit'])->name('orders.edit');
+    Route::put('/orders/{id}', [OrderController::class, 'update'])->name('orders.update');
+    Route::post('/orders/{id}/update-status', [OrderController::class, 'updateStatus'])->name('orders.update-status');
+    
+    // Dispatch
+    Route::get('/dispatch', [DispatchController::class, 'index'])->name('dispatch.index');
+    Route::post('/dispatch/assign-pickup-driver', [DispatchController::class, 'assignPickupDriver'])->name('dispatch.assign-pickup-driver');
+    Route::post('/dispatch/auto-assign-pickup-driver', [DispatchController::class, 'autoAssignPickupDriver'])->name('dispatch.auto-assign-pickup-driver');
+    Route::post('/dispatch/update-pickup-status/{id}', [DispatchController::class, 'updatePickupStatus'])->name('dispatch.update-pickup-status');
+    
+    // Warehouses
+    Route::get('/warehouses', [WarehouseController::class, 'index'])->name('warehouses.index');
+    Route::post('/warehouses', [WarehouseController::class, 'store'])->name('warehouses.store');
+    Route::get('/warehouses/{id}', [WarehouseController::class, 'show'])->name('warehouses.show');
+    Route::post('/warehouses/receive-order', [WarehouseController::class, 'receiveOrder'])->name('warehouses.receive-order');
+    Route::post('/warehouses/release-order', [WarehouseController::class, 'releaseOrder'])->name('warehouses.release-order');
+    Route::post('/warehouses/bulk-release-order', [WarehouseController::class, 'bulkReleaseOrder'])->name('warehouses.bulk-release-order');
+    
+    // Delivery
+    Route::get('/delivery', [DeliveryController::class, 'index'])->name('delivery.index');
+    Route::post('/delivery/assign-driver/{id}', [DeliveryController::class, 'assignDeliveryDriver'])->name('delivery.assign-driver');
+    Route::post('/delivery/bulk-assign-driver', [DeliveryController::class, 'bulkAssignDeliveryDriver'])->name('delivery.bulk-assign-driver');
+    
+    // Tracking
+    Route::get('/tracking', [TrackingController::class, 'index'])->name('tracking.index');
+    Route::post('/tracking', [TrackingController::class, 'track'])->name('tracking.track');
+    
+    // Shipping Fees
+    Route::get('/shipping-fees', [ShippingFeeController::class, 'index'])->name('shipping-fees.index');
+    Route::post('/shipping-fees', [ShippingFeeController::class, 'store'])->name('shipping-fees.store');
+    Route::post('/shipping-fees/calculate', [ShippingFeeController::class, 'calculate'])->name('shipping-fees.calculate');
+    
+    // Reports
+    Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+    
+    // COD Reconciliations
+    Route::get('/cod-reconciliations', [CodReconciliationController::class, 'index'])->name('cod-reconciliations.index');
+    Route::post('/cod-reconciliations', [CodReconciliationController::class, 'store'])->name('cod-reconciliations.store');
+    Route::get('/cod-reconciliations/{id}', [CodReconciliationController::class, 'show'])->name('cod-reconciliations.show');
+    Route::post('/cod-reconciliations/{id}/update-payment', [CodReconciliationController::class, 'updatePayment'])->name('cod-reconciliations.update-payment');
+    
+    // Drivers
+    Route::get('/drivers', [DriverController::class, 'index'])->name('drivers.index');
+    Route::post('/drivers', [DriverController::class, 'store'])->name('drivers.store');
+    Route::get('/drivers/{id}', [DriverController::class, 'show'])->name('drivers.show');
+    
+    // Routes
+    Route::get('/routes', [RouteController::class, 'index'])->name('routes.index');
+    Route::post('/routes', [RouteController::class, 'store'])->name('routes.store');
+    Route::get('/routes/{id}', [RouteController::class, 'show'])->name('routes.show');
+});
