@@ -64,6 +64,23 @@
                             <input type="hidden" name="sender_ward" id="sender_ward" value="">
                         </div>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">Phương thức nhận hàng <span class="text-danger">*</span></label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="pickup_method" id="pickup_method_driver" value="driver" checked>
+                            <label class="form-check-label" for="pickup_method_driver">
+                                <i class="fas fa-truck me-1"></i>Tài xế đến lấy hàng
+                            </label>
+                            <small class="d-block text-muted ms-4">Tài xế sẽ đến địa chỉ người gửi để lấy hàng</small>
+                        </div>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="radio" name="pickup_method" id="pickup_method_warehouse" value="warehouse">
+                            <label class="form-check-label" for="pickup_method_warehouse">
+                                <i class="fas fa-warehouse me-1"></i>Đưa đến kho
+                            </label>
+                            <small class="d-block text-muted ms-4">Người gửi tự đưa hàng đến kho Nghệ An, đơn hàng sẽ tự động có mặt tại kho</small>
+                        </div>
+                    </div>
                 </div>
                 
                 <div class="col-md-6">

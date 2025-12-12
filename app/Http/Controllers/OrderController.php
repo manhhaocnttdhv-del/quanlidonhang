@@ -87,6 +87,7 @@ class OrderController extends Controller
             'service_type' => 'nullable|in:express,standard,economy',
             'is_fragile' => 'nullable|boolean',
             'notes' => 'nullable|string',
+            'pickup_method' => 'required|in:driver,warehouse', // driver: tài xế đến lấy, warehouse: đưa đến kho
         ]);
 
         // Generate tracking number
@@ -108,23 +109,52 @@ class OrderController extends Controller
 
         // Force sender province to Nghệ An
         $validated['sender_province'] = 'Nghệ An';
+        
+        // Xác định trạng thái ban đầu dựa trên phương thức nhận hàng
+        $pickupMethod = $validated['pickup_method'] ?? 'driver';
+        $initialStatus = $pickupMethod === 'warehouse' ? 'in_warehouse' : 'pending';
+        
+        // Xóa pickup_method khỏi validated (không lưu vào database)
+        unset($validated['pickup_method']);
 
         $order = Order::create([
             ...$validated,
             'tracking_number' => $trackingNumber,
             'shipping_fee' => $shippingFee,
-            'status' => 'pending',
+            'status' => $initialStatus,
             'warehouse_id' => $defaultWarehouse->id ?? null,
             'created_by' => auth()->id(),
         ]);
 
         // Create initial status
-        OrderStatus::create([
-            'order_id' => $order->id,
-            'status' => 'pending',
-            'notes' => 'Đơn hàng mới được tạo',
-            'updated_by' => auth()->id(),
-        ]);
+        if ($pickupMethod === 'warehouse') {
+            // Nếu đưa đến kho, tạo status in_warehouse và warehouse transaction
+            OrderStatus::create([
+                'order_id' => $order->id,
+                'status' => 'in_warehouse',
+                'notes' => 'Người gửi đã đưa hàng đến kho Nghệ An',
+                'warehouse_id' => $defaultWarehouse->id ?? null,
+                'updated_by' => auth()->id(),
+            ]);
+            
+            // Tạo warehouse transaction
+            \App\Models\WarehouseTransaction::create([
+                'warehouse_id' => $defaultWarehouse->id,
+                'order_id' => $order->id,
+                'type' => 'in',
+                'transaction_date' => now(),
+                'notes' => 'Người gửi đưa hàng đến kho',
+                'created_by' => auth()->id(),
+            ]);
+        } else {
+            // Nếu tài xế đến lấy, tạo status pending
+            OrderStatus::create([
+                'order_id' => $order->id,
+                'status' => 'pending',
+                'notes' => 'Đơn hàng mới được tạo, chờ tài xế đến lấy',
+                'updated_by' => auth()->id(),
+            ]);
+        }
 
         if ($request->expectsJson()) {
             return response()->json([

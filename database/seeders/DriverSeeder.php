@@ -11,53 +11,63 @@ class DriverSeeder extends Seeder
 {
     public function run(): void
     {
-        $warehouses = Warehouse::all();
+        // Lấy kho Nghệ An (kho mặc định)
+        $ngheAnWarehouse = Warehouse::where('province', 'Nghệ An')
+            ->orWhere('name', 'LIKE', '%Nghệ An%')
+            ->orWhere('code', 'LIKE', '%NA%')
+            ->first();
+        
+        if (!$ngheAnWarehouse) {
+            $ngheAnWarehouse = Warehouse::first();
+        }
         
         $drivers = [
             [
-                'code' => 'TX' . strtoupper(Str::random(8)),
+                'code' => 'TX-NA-001',
                 'name' => 'Nguyễn Văn Tài Xế 1',
                 'phone' => '0911111111',
                 'email' => 'taixe1@smartpost.com',
-                'license_number' => 'A123456',
+                'license_number' => 'NA-123456',
                 'vehicle_type' => 'Xe tải nhỏ',
-                'vehicle_number' => '51A-12345',
-                'area' => 'Quận 1, Quận 3',
-                'warehouse_id' => $warehouses->where('province', 'Hồ Chí Minh')->first()?->id,
+                'vehicle_number' => '37A-12345',
+                'area' => 'Thành phố Vinh, Nghệ An',
+                'warehouse_id' => $ngheAnWarehouse->id,
                 'is_active' => true,
             ],
             [
-                'code' => 'TX' . strtoupper(Str::random(8)),
+                'code' => 'TX-NA-002',
                 'name' => 'Trần Văn Tài Xế 2',
                 'phone' => '0912222222',
                 'email' => 'taixe2@smartpost.com',
-                'license_number' => 'B234567',
+                'license_number' => 'NA-234567',
                 'vehicle_type' => 'Xe máy',
-                'vehicle_number' => '51B-23456',
-                'area' => 'Quận 7, Quận 8',
-                'warehouse_id' => $warehouses->where('province', 'Hồ Chí Minh')->first()?->id,
+                'vehicle_number' => '37B-23456',
+                'area' => 'Thành phố Vinh, Nghệ An',
+                'warehouse_id' => $ngheAnWarehouse->id,
                 'is_active' => true,
             ],
             [
-                'code' => 'TX' . strtoupper(Str::random(8)),
+                'code' => 'TX-NA-003',
                 'name' => 'Lê Văn Tài Xế 3',
                 'phone' => '0913333333',
-                'license_number' => 'C345678',
+                'email' => 'taixe3@smartpost.com',
+                'license_number' => 'NA-345678',
                 'vehicle_type' => 'Xe tải nhỏ',
-                'vehicle_number' => '29A-34567',
-                'area' => 'Quận Hoàn Kiếm, Quận Đống Đa',
-                'warehouse_id' => $warehouses->where('province', 'Hà Nội')->first()?->id,
+                'vehicle_number' => '37C-34567',
+                'area' => 'Thành phố Vinh, Nghệ An',
+                'warehouse_id' => $ngheAnWarehouse->id,
                 'is_active' => true,
             ],
             [
-                'code' => 'TX' . strtoupper(Str::random(8)),
+                'code' => 'TX-NA-004',
                 'name' => 'Phạm Văn Tài Xế 4',
                 'phone' => '0914444444',
-                'license_number' => 'D456789',
+                'email' => 'taixe4@smartpost.com',
+                'license_number' => 'NA-456789',
                 'vehicle_type' => 'Xe máy',
-                'vehicle_number' => '43A-45678',
-                'area' => 'Quận Hải Châu',
-                'warehouse_id' => $warehouses->where('province', 'Đà Nẵng')->first()?->id,
+                'vehicle_number' => '37D-45678',
+                'area' => 'Thành phố Vinh, Nghệ An',
+                'warehouse_id' => $ngheAnWarehouse->id,
                 'is_active' => true,
             ],
         ];

@@ -17,11 +17,23 @@ class OrderSeeder extends Seeder
     {
         $customers = Customer::all();
         $drivers = Driver::all();
-        $warehouses = Warehouse::all();
+        // Lấy kho Nghệ An (kho mặc định)
+        $ngheAnWarehouse = Warehouse::where('province', 'Nghệ An')
+            ->orWhere('name', 'LIKE', '%Nghệ An%')
+            ->orWhere('code', 'LIKE', '%NA%')
+            ->first();
+        
+        if (!$ngheAnWarehouse) {
+            $ngheAnWarehouse = Warehouse::first();
+        }
+        
         $routes = Route::all();
 
         $statuses = ['pending', 'pickup_pending', 'picked_up', 'in_warehouse', 'in_transit', 'out_for_delivery', 'delivered', 'failed'];
         $serviceTypes = ['express', 'standard', 'economy'];
+        
+        // Danh sách tỉnh nhận
+        $receiverProvinces = ['Hà Nội', 'Hồ Chí Minh', 'Đà Nẵng', 'Hải Phòng', 'Cần Thơ', 'An Giang', 'Bà Rịa - Vũng Tàu', 'Bắc Giang', 'Bắc Kạn', 'Bạc Liêu', 'Bắc Ninh', 'Bến Tre', 'Bình Định', 'Bình Dương', 'Bình Phước', 'Bình Thuận', 'Cà Mau', 'Cao Bằng', 'Đắk Lắk', 'Đắk Nông', 'Điện Biên', 'Đồng Nai', 'Đồng Tháp', 'Gia Lai', 'Hà Giang', 'Hà Nam', 'Hà Tĩnh', 'Hải Dương', 'Hậu Giang', 'Hòa Bình', 'Hưng Yên', 'Khánh Hòa', 'Kiên Giang', 'Kon Tum', 'Lai Châu', 'Lâm Đồng', 'Lạng Sơn', 'Lào Cai', 'Long An', 'Nam Định', 'Nghệ An', 'Ninh Bình', 'Ninh Thuận', 'Phú Thọ', 'Phú Yên', 'Quảng Bình', 'Quảng Nam', 'Quảng Ngãi', 'Quảng Ninh', 'Quảng Trị', 'Sóc Trăng', 'Sơn La', 'Tây Ninh', 'Thái Bình', 'Thái Nguyên', 'Thanh Hóa', 'Thừa Thiên Huế', 'Tiền Giang', 'Trà Vinh', 'Tuyên Quang', 'Vĩnh Long', 'Vĩnh Phúc', 'Yên Bái'];
 
         for ($i = 1; $i <= 20; $i++) {
             $status = $statuses[array_rand($statuses)];
@@ -29,8 +41,11 @@ class OrderSeeder extends Seeder
             $customer = $customers->random();
             $pickupDriver = $drivers->random();
             $deliveryDriver = $drivers->random();
-            $warehouse = $warehouses->random();
-            $route = $routes->random();
+            $receiverProvince = $receiverProvinces[array_rand($receiverProvinces)];
+            // Tìm tuyến từ Nghệ An đến tỉnh nhận
+            $route = $routes->where('from_province', 'Nghệ An')
+                ->where('to_province', $receiverProvince)
+                ->first();
 
             $weight = rand(1, 20) + (rand(0, 99) / 100);
             $codAmount = rand(0, 100) > 50 ? rand(100000, 5000000) : 0;
@@ -43,14 +58,14 @@ class OrderSeeder extends Seeder
                 'customer_id' => $customer->id,
                 'sender_name' => $customer->name,
                 'sender_phone' => $customer->phone,
-                'sender_address' => $customer->address,
-                'sender_province' => $customer->province,
-                'sender_district' => $customer->district,
-                'sender_ward' => $customer->ward,
+                'sender_address' => $customer->address ?? 'Số 1 Đường Quang Trung, Phường Hưng Bình',
+                'sender_province' => 'Nghệ An', // Luôn là Nghệ An
+                'sender_district' => 'Thành phố Vinh',
+                'sender_ward' => 'Phường Hưng Bình',
                 'receiver_name' => 'Người nhận ' . $i,
                 'receiver_phone' => '09' . rand(10000000, 99999999),
                 'receiver_address' => rand(1, 999) . ' Đường ABC, Phường ' . rand(1, 20),
-                'receiver_province' => ['Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng'][array_rand(['Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng'])],
+                'receiver_province' => $receiverProvince,
                 'receiver_district' => 'Quận ' . rand(1, 12),
                 'receiver_ward' => 'Phường ' . rand(1, 20),
                 'item_type' => ['Điện tử', 'Quần áo', 'Thực phẩm', 'Sách', 'Đồ chơi'][array_rand(['Điện tử', 'Quần áo', 'Thực phẩm', 'Sách', 'Đồ chơi'])],
@@ -64,8 +79,8 @@ class OrderSeeder extends Seeder
                 'status' => $status,
                 'pickup_driver_id' => $status !== 'pending' ? $pickupDriver->id : null,
                 'delivery_driver_id' => in_array($status, ['out_for_delivery', 'delivered', 'failed']) ? $deliveryDriver->id : null,
-                'route_id' => in_array($status, ['in_transit', 'out_for_delivery', 'delivered']) ? $route->id : null,
-                'warehouse_id' => in_array($status, ['in_warehouse', 'in_transit', 'out_for_delivery']) ? $warehouse->id : null,
+                'route_id' => in_array($status, ['in_transit', 'out_for_delivery', 'delivered']) && $route ? $route->id : null,
+                'warehouse_id' => in_array($status, ['in_warehouse', 'in_transit', 'out_for_delivery']) ? $ngheAnWarehouse->id : null,
                 'pickup_scheduled_at' => $status !== 'pending' ? now()->subDays(rand(1, 5)) : null,
                 'picked_up_at' => in_array($status, ['picked_up', 'in_warehouse', 'in_transit', 'out_for_delivery', 'delivered']) ? now()->subDays(rand(1, 4)) : null,
                 'delivery_scheduled_at' => in_array($status, ['out_for_delivery', 'delivered', 'failed']) ? now()->subDays(rand(0, 2)) : null,
@@ -102,8 +117,8 @@ class OrderSeeder extends Seeder
                 $warehouseTime = $order->picked_up_at ? $order->picked_up_at->copy()->addHours(2) : now();
                 $statusHistory[] = [
                     'status' => 'in_warehouse',
-                    'notes' => 'Đã nhập kho',
-                    'warehouse_id' => $warehouse->id,
+                    'notes' => 'Đã nhập kho Nghệ An',
+                    'warehouse_id' => $ngheAnWarehouse->id,
                     'created_at' => $warehouseTime,
                 ];
             }
@@ -112,8 +127,8 @@ class OrderSeeder extends Seeder
                 $transitTime = $order->picked_up_at ? $order->picked_up_at->copy()->addDays(1) : now();
                 $statusHistory[] = [
                     'status' => 'in_transit',
-                    'notes' => 'Đang vận chuyển',
-                    'warehouse_id' => $warehouse->id,
+                    'notes' => 'Đang vận chuyển từ Nghệ An đến ' . $receiverProvince,
+                    'warehouse_id' => $ngheAnWarehouse->id,
                     'created_at' => $transitTime,
                 ];
             }

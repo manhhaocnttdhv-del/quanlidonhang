@@ -20,7 +20,6 @@ class WarehouseSeeder extends Seeder
                 'phone' => '0238123456',
                 'manager_name' => 'Nguyễn Văn Quản Lý',
                 'is_active' => true,
-                'is_default' => true,
             ],
             [
                 'code' => 'KHO-HCM-001',
