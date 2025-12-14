@@ -7,8 +7,13 @@
 <div class="row mb-4">
     <div class="col-md-8">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Thông tin kho</h5>
+                @if(auth()->user()->canManageWarehouses())
+                <a href="{{ route('admin.warehouses.edit', $warehouse->id) }}" class="btn btn-sm btn-primary">
+                    <i class="fas fa-edit me-1"></i>Sửa kho
+                </a>
+                @endif
             </div>
             <div class="card-body">
                 <div class="row">

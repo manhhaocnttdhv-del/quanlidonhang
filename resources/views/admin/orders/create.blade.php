@@ -179,6 +179,12 @@
                     <div class="alert alert-info">
                         <strong>Phí vận chuyển ước tính:</strong>
                         <div id="estimated_fee" class="h4 mb-0">0 đ</div>
+                        <hr class="my-2">
+                        <small class="d-block"><strong>Công thức tính:</strong></small>
+                        <small class="d-block">Tổng phí = <span id="formula_base">Phí cơ bản</span> + <span id="formula_weight">Phí theo trọng lượng</span> + <span id="formula_cod">Phí COD</span></small>
+                        <small class="d-block mt-1">
+                            <span id="formula_detail" class="text-muted">Phí cơ bản + (Trọng lượng - Trọng lượng tối thiểu) × Phí/kg + COD × %COD</span>
+                        </small>
                     </div>
                 </div>
             </div>
@@ -571,11 +577,43 @@ $(document).ready(function() {
             },
             success: function(response) {
                 if (response.total_fee !== undefined) {
-                    $('#estimated_fee').text(new Intl.NumberFormat('vi-VN').format(response.total_fee) + ' đ');
+                    const totalFee = response.total_fee;
+                    const baseFee = response.base_fee || 0;
+                    const weightFee = response.weight_fee || 0;
+                    const codFee = response.cod_fee || 0;
+                    
+                    // Hiển thị tổng phí
+                    $('#estimated_fee').text(new Intl.NumberFormat('vi-VN').format(totalFee) + ' đ');
+                    
+                    // Hiển thị chi tiết công thức
+                    $('#formula_base').text(new Intl.NumberFormat('vi-VN').format(baseFee) + ' đ');
+                    $('#formula_weight').text(new Intl.NumberFormat('vi-VN').format(weightFee) + ' đ');
+                    $('#formula_cod').text(new Intl.NumberFormat('vi-VN').format(codFee) + ' đ');
+                    
+                    // Hiển thị công thức chi tiết
+                    const weight = parseFloat($('#weight').val()) || 0;
+                    const codAmount = parseFloat($('#cod_amount').val()) || 0;
+                    let detail = `${new Intl.NumberFormat('vi-VN').format(baseFee)} đ (phí cơ bản)`;
+                    if (weightFee > 0) {
+                        detail += ` + ${new Intl.NumberFormat('vi-VN').format(weightFee)} đ (${weight}kg × phí/kg)`;
+                    }
+                    if (codFee > 0) {
+                        detail += ` + ${new Intl.NumberFormat('vi-VN').format(codFee)} đ (COD ${new Intl.NumberFormat('vi-VN').format(codAmount)} đ × ${response.cod_fee_percent || 0}%)`;
+                    }
+                    detail += ` = ${new Intl.NumberFormat('vi-VN').format(totalFee)} đ`;
+                    $('#formula_detail').text(detail);
                 } else if (response.estimated_fee) {
                     $('#estimated_fee').text(new Intl.NumberFormat('vi-VN').format(response.estimated_fee) + ' đ (ước tính)');
+                    $('#formula_base').text('N/A');
+                    $('#formula_weight').text('N/A');
+                    $('#formula_cod').text('N/A');
+                    $('#formula_detail').text('Sử dụng phí ước tính mặc định');
                 } else {
                     $('#estimated_fee').text('Không tính được phí');
+                    $('#formula_base').text('N/A');
+                    $('#formula_weight').text('N/A');
+                    $('#formula_cod').text('N/A');
+                    $('#formula_detail').text('Không tìm thấy bảng cước phù hợp');
                 }
             },
             error: function(xhr) {

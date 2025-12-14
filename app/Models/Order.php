@@ -38,6 +38,7 @@ class Order extends Model
         'delivery_driver_id',
         'route_id',
         'warehouse_id',
+        'to_warehouse_id',
         'pickup_scheduled_at',
         'picked_up_at',
         'delivery_scheduled_at',
@@ -86,6 +87,11 @@ class Order extends Model
     public function warehouse()
     {
         return $this->belongsTo(Warehouse::class);
+    }
+
+    public function toWarehouse()
+    {
+        return $this->belongsTo(Warehouse::class, 'to_warehouse_id');
     }
 
     public function statuses()

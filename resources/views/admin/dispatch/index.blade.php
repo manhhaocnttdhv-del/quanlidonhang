@@ -77,10 +77,29 @@
         <small class="text-muted">Cập nhật trạng thái khi tài xế đang lấy hàng hoặc đã lấy hàng</small>
     </div>
     <div class="card-body">
+        {{-- Action buttons for bulk operations --}}
+        <div class="mb-3 d-flex gap-2 align-items-center d-none" id="bulkActions">
+            <span class="text-muted me-2">
+                <strong id="selectedAssignedCount">0</strong> đơn hàng đã chọn
+            </span>
+            <button type="button" class="btn btn-sm btn-info" id="bulkPickingUpBtn" onclick="bulkUpdateStatus('picking_up')">
+                <i class="fas fa-walking me-1"></i>Đang lấy
+            </button>
+            <button type="button" class="btn btn-sm btn-success" id="bulkPickedUpBtn" onclick="bulkUpdateStatus('picked_up')">
+                <i class="fas fa-check me-1"></i>Đã lấy
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="clearSelectedAssigned()">
+                <i class="fas fa-times me-1"></i>Bỏ chọn
+            </button>
+        </div>
+        
         <div class="table-responsive">
             <table class="table table-hover">
                 <thead>
                     <tr>
+                        <th width="50">
+                            <input type="checkbox" id="selectAllAssigned">
+                        </th>
                         <th>Mã vận đơn</th>
                         <th>Tài xế</th>
                         <th>Người gửi</th>
@@ -93,6 +112,9 @@
                 <tbody>
                     @forelse($assignedOrders ?? [] as $order)
                     <tr>
+                        <td>
+                            <input type="checkbox" class="assigned-order-checkbox" value="{{ $order->id }}" data-status="{{ $order->status }}">
+                        </td>
                         <td><strong>{{ $order->tracking_number }}</strong></td>
                         <td>
                             <strong>{{ $order->pickupDriver->name ?? 'N/A' }}</strong><br>
@@ -139,7 +161,7 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="text-center">Không có đơn hàng nào đã được phân công</td>
+                        <td colspan="8" class="text-center">Không có đơn hàng nào đã được phân công</td>
                     </tr>
                     @endforelse
                 </tbody>
@@ -271,6 +293,111 @@ function autoAssignDriver() {
     if (confirm(`Bạn có chắc muốn tự động phân công tài xế ngẫu nhiên cho ${selected.length} đơn hàng đã chọn?`)) {
         $('#autoAssignForm').submit();
     }
+}
+
+// Handle assigned orders checkbox selection
+$(document).ready(function() {
+    $('#selectAllAssigned').on('change', function() {
+        $('.assigned-order-checkbox').prop('checked', this.checked);
+        updateAssignedSelectedCount();
+    });
+    
+    $('.assigned-order-checkbox').on('change', function() {
+        updateAssignedSelectedCount();
+        // Update select all checkbox state
+        const total = $('.assigned-order-checkbox').length;
+        const checked = $('.assigned-order-checkbox:checked').length;
+        $('#selectAllAssigned').prop('checked', total === checked && total > 0);
+    });
+    
+    function updateAssignedSelectedCount() {
+        const selected = $('.assigned-order-checkbox:checked').map(function() {
+            return $(this).val();
+        }).get();
+        
+        const count = selected.length;
+        $('#selectedAssignedCount').text(count);
+        
+        // Show/hide bulk actions
+        if (count > 0) {
+            $('#bulkActions').removeClass('d-none');
+            
+            // Check if selected orders can be updated to picking_up (must be pickup_pending)
+            const canPickingUp = $('.assigned-order-checkbox:checked').filter(function() {
+                return $(this).data('status') === 'pickup_pending';
+            }).length > 0;
+            
+            // Check if selected orders can be updated to picked_up (must be picking_up)
+            const canPickedUp = $('.assigned-order-checkbox:checked').filter(function() {
+                return $(this).data('status') === 'picking_up';
+            }).length > 0;
+            
+            $('#bulkPickingUpBtn').prop('disabled', !canPickingUp);
+            $('#bulkPickedUpBtn').prop('disabled', !canPickedUp);
+        } else {
+            $('#bulkActions').addClass('d-none');
+        }
+    }
+    
+    // Initialize on page load
+    updateAssignedSelectedCount();
+});
+
+function clearSelectedAssigned() {
+    $('.assigned-order-checkbox').prop('checked', false);
+    $('#selectAllAssigned').prop('checked', false);
+    $('#bulkActions').addClass('d-none');
+    $('#selectedAssignedCount').text('0');
+}
+
+function bulkUpdateStatus(status) {
+    const selected = $('.assigned-order-checkbox:checked').map(function() {
+        return $(this).val();
+    }).get();
+    
+    if (selected.length === 0) {
+        alert('Vui lòng chọn ít nhất một đơn hàng');
+        return;
+    }
+    
+    const statusText = status === 'picking_up' ? 'đang đi lấy hàng' : 'đã lấy hàng';
+    if (!confirm(`Xác nhận cập nhật trạng thái "${statusText}" cho ${selected.length} đơn hàng đã chọn?`)) {
+        return;
+    }
+    
+    // Disable buttons during processing
+    $('#bulkPickingUpBtn, #bulkPickedUpBtn').prop('disabled', true);
+    
+    // Update each order
+    let completed = 0;
+    let failed = 0;
+    const total = selected.length;
+    
+    selected.forEach(function(orderId, index) {
+        $.ajax({
+            url: `/admin/dispatch/update-pickup-status/${orderId}`,
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                status: status,
+                notes: status === 'picking_up' ? 'Tài xế đang đi lấy hàng (hàng loạt)' : 'Tài xế đã lấy hàng và đưa về kho (hàng loạt)'
+            },
+            success: function(response) {
+                completed++;
+                if (completed + failed === total) {
+                    alert(`Đã cập nhật thành công ${completed} đơn hàng${failed > 0 ? `, ${failed} đơn thất bại` : ''}`);
+                    location.reload();
+                }
+            },
+            error: function(xhr) {
+                failed++;
+                if (completed + failed === total) {
+                    alert(`Đã cập nhật thành công ${completed} đơn hàng${failed > 0 ? `, ${failed} đơn thất bại` : ''}`);
+                    location.reload();
+                }
+            }
+        });
+    });
 }
 
 function updatePickupStatus(orderId, status) {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Driver;
+use App\Models\Warehouse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -13,7 +14,13 @@ class DriverController extends Controller
      */
     public function index(Request $request)
     {
+        $user = auth()->user();
         $query = Driver::with('warehouse');
+
+        // Warehouse admin chỉ xem tài xế của kho mình
+        if ($user->isWarehouseAdmin()) {
+            $query->where('warehouse_id', $user->warehouse_id);
+        }
 
         if ($request->has('area')) {
             $query->where('area', $request->area);
@@ -27,13 +34,26 @@ class DriverController extends Controller
             $query->where('is_active', $request->is_active);
         }
 
+        if ($request->has('driver_type')) {
+            $query->where('driver_type', $request->driver_type);
+        }
+
         $drivers = $query->orderBy('created_at', 'desc')->paginate(20);
 
         if ($request->expectsJson()) {
             return response()->json($drivers);
         }
         
-        return view('admin.drivers.index', compact('drivers'));
+        // Super admin và admin xem tất cả kho, warehouse admin chỉ xem kho của mình
+        if ($user->canManageWarehouses()) {
+            $warehouses = Warehouse::where('is_active', true)->orderBy('name')->get();
+        } else {
+            $warehouses = Warehouse::where('id', $user->warehouse_id)
+                ->where('is_active', true)
+                ->get();
+        }
+        
+        return view('admin.drivers.index', compact('drivers', 'warehouses'));
     }
 
     /**
@@ -41,6 +61,8 @@ class DriverController extends Controller
      */
     public function store(Request $request)
     {
+        $user = auth()->user();
+        
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'phone' => 'required|string|max:20',
@@ -50,8 +72,14 @@ class DriverController extends Controller
             'vehicle_number' => 'nullable|string|max:50',
             'area' => 'nullable|string|max:255',
             'warehouse_id' => 'nullable|exists:warehouses,id',
+            'driver_type' => 'required|in:shipper,intercity_driver',
             'notes' => 'nullable|string',
         ]);
+
+        // Nếu là warehouse admin, tự động gán kho của họ
+        if ($user->isWarehouseAdmin()) {
+            $validated['warehouse_id'] = $user->warehouse_id;
+        }
 
         $code = $this->generateDriverCode();
 
@@ -95,6 +123,7 @@ class DriverController extends Controller
             'vehicle_number' => 'nullable|string|max:50',
             'area' => 'nullable|string|max:255',
             'warehouse_id' => 'nullable|exists:warehouses,id',
+            'driver_type' => 'sometimes|in:shipper,intercity_driver',
             'is_active' => 'sometimes|boolean',
             'notes' => 'nullable|string',
         ]);

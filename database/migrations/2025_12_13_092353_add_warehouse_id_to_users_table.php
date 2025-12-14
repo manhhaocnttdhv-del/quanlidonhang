@@ -12,9 +12,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('role')->default('staff')->after('email')->comment('super_admin, admin, manager, dispatcher, warehouse_admin, warehouse_staff, driver, staff');
-            $table->string('phone')->nullable()->after('role');
-            $table->boolean('is_active')->default(true)->after('phone');
+            $table->unsignedBigInteger('warehouse_id')->nullable()->after('is_active');
+            $table->foreign('warehouse_id')->references('id')->on('warehouses')->nullOnDelete();
         });
     }
 
@@ -24,7 +23,8 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn(['role', 'phone', 'is_active']);
+            $table->dropForeign(['warehouse_id']);
+            $table->dropColumn('warehouse_id');
         });
     }
 };

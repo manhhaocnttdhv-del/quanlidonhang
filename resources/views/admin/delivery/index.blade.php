@@ -6,22 +6,32 @@
 @section('content')
 <div class="row mb-4">
     <div class="col-md-3">
-        <div class="card text-white bg-info">
-            <div class="card-body">
-                <h6 class="card-subtitle mb-2">Đã xuất kho - Đang vận chuyển</h6>
-                <h3 class="mb-0">{{ $stats['in_transit'] ?? 0 }}</h3>
-                <small>Đã xuất kho, đang đi các tỉnh</small>
+        <a href="#inTransitSection" class="text-decoration-none" style="color: inherit;">
+            <div class="card text-white bg-info" style="cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2">Đã xuất kho - Đang vận chuyển</h6>
+                    <h3 class="mb-0">{{ $stats['in_transit'] ?? 0 }}</h3>
+                    <small>Đã xuất kho, đang đi các tỉnh</small>
+                    <div class="mt-2">
+                        <small><i class="fas fa-arrow-down me-1"></i>Click để xem chi tiết</small>
+                    </div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-md-3">
-        <div class="card text-white bg-primary">
-            <div class="card-body">
-                <h6 class="card-subtitle mb-2">Đang giao</h6>
-                <h3 class="mb-0">{{ $stats['out_for_delivery'] ?? 0 }}</h3>
-                <small>Đã phân công tài xế giao</small>
+        <a href="#deliverySection" class="text-decoration-none" style="color: inherit;">
+            <div class="card text-white bg-primary" style="cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2">Đang giao</h6>
+                    <h3 class="mb-0">{{ $stats['out_for_delivery'] ?? 0 }}</h3>
+                    <small>Đã phân công tài xế giao</small>
+                    <div class="mt-2">
+                        <small><i class="fas fa-arrow-down me-1"></i>Click để xem chi tiết</small>
+                    </div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-md-3">
         <div class="card text-white bg-success">
@@ -41,7 +51,7 @@
     </div>
 </div>
 
-<div class="card mb-4">
+<div class="card mb-4" id="inTransitSection">
     <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
         <div>
             <h5 class="mb-0"><i class="fas fa-truck me-2"></i>Đơn hàng đã xuất kho - Đang vận chuyển</h5>
@@ -94,7 +104,8 @@
                         <td>
                             <input type="checkbox" class="order-checkbox-intransit" value="{{ $order->id }}" 
                                    data-tracking="{{ $order->tracking_number }}"
-                                   data-receiver-province="{{ $order->receiver_province }}">
+                                   data-receiver-province="{{ $order->receiver_province }}"
+                                   data-to-warehouse="{{ $order->to_warehouse_id ?? '' }}">
                         </td>
                         <td><strong>{{ $order->tracking_number }}</strong></td>
                         <td>
@@ -104,11 +115,23 @@
                         <td>{{ $order->receiver_address }}</td>
                         <td><span class="badge bg-info">{{ $order->receiver_province }}</span></td>
                         <td>
-                            @if($order->route)
-                            <small>{{ $order->route->name }}</small><br>
-                            <small class="text-muted">{{ $order->route->from_province }} → {{ $order->route->to_province }}</small>
+                            @if($order->to_warehouse_id)
+                                @php
+                                    $toWarehouse = \App\Models\Warehouse::find($order->to_warehouse_id);
+                                @endphp
+                                @if($toWarehouse)
+                                    <small class="text-warning">
+                                        <i class="fas fa-warehouse me-1"></i>Đang đến: {{ $toWarehouse->name }}
+                                    </small><br>
+                                    <small class="text-muted">Kho đích chưa nhận được</small>
+                                @else
+                                    <span class="text-muted">Chưa có</span>
+                                @endif
+                            @elseif($order->route)
+                                <small>{{ $order->route->name }}</small><br>
+                                <small class="text-muted">{{ $order->route->from_province }} → {{ $order->route->to_province }}</small>
                             @else
-                            <span class="text-muted">Chưa có</span>
+                                <span class="text-muted">Chưa có</span>
                             @endif
                         </td>
                         <td>{{ number_format($order->cod_amount) }} đ</td>
@@ -127,7 +150,8 @@
                         </td>
                         <td>
                             <div class="btn-group" role="group">
-                                <button class="btn btn-sm btn-success" onclick="assignDriver({{ $order->id }})" title="Phân công tài xế giao hàng">
+                                <button class="btn btn-sm btn-success" onclick="assignDriver({{ $order->id }}, {{ $order->to_warehouse_id ?? 'null' }})" 
+                                        title="{{ $order->to_warehouse_id ? 'Phân công tài xế vận chuyển tỉnh (kho đích chưa nhận được)' : 'Phân công tài xế giao hàng' }}">
                                     <i class="fas fa-user-plus"></i>
                                 </button>
                                 <a href="{{ route('admin.orders.show', $order->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết">
@@ -149,7 +173,7 @@
     </div>
 </div>
 
-<div class="card">
+<div class="card" id="deliverySection">
     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
         <div>
             <h5 class="mb-0"><i class="fas fa-shipping-fast me-2"></i>Đơn hàng đang giao</h5>
@@ -247,14 +271,29 @@
                 </div>
                 <div class="modal-body">
                     <input type="hidden" name="order_id" id="orderId">
+                    <div id="orderToWarehouseWarning" class="alert alert-warning d-none">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Lưu ý:</strong> Đơn hàng này đang vận chuyển đến kho khác. 
+                        <strong>Kho đích chưa nhận được hàng.</strong> 
+                        Chỉ có thể phân công <strong>tài xế vận chuyển tỉnh</strong> để vận chuyển đến kho đích.
+                    </div>
                     <div class="mb-3">
                         <label class="form-label">Chọn tài xế <span class="text-danger">*</span></label>
-                        <select name="driver_id" class="form-select" required>
+                        <select name="driver_id" class="form-select" required id="driverSelect">
                             <option value="">-- Chọn tài xế --</option>
                             @foreach($drivers ?? [] as $driver)
-                            <option value="{{ $driver->id }}">{{ $driver->name }} - {{ $driver->phone }}</option>
+                            <option value="{{ $driver->id }}" 
+                                    data-driver-type="{{ $driver->driver_type }}">
+                                {{ $driver->name }} - {{ $driver->phone }}
+                                @if($driver->driver_type === 'intercity_driver')
+                                    <span class="badge bg-warning">Vận chuyển tỉnh</span>
+                                @elseif($driver->driver_type === 'shipper')
+                                    <span class="badge bg-info">Shipper</span>
+                                @endif
+                            </option>
                             @endforeach
                         </select>
+                        <small class="text-muted" id="driverSelectHint"></small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Thời gian giao dự kiến</label>
@@ -314,6 +353,17 @@
     </div>
 </div>
 @endsection
+
+@push('styles')
+<style>
+    html {
+        scroll-behavior: smooth;
+    }
+    .card[style*="cursor: pointer"]:hover {
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+</style>
+@endpush
 
 @push('scripts')
 <script>
@@ -387,9 +437,35 @@ $(document).ready(function() {
     @endif
 });
 
-function assignDriver(orderId) {
+function assignDriver(orderId, toWarehouseId) {
     $('#orderId').val(orderId);
     $('#assignDriverForm').attr('action', '/admin/delivery/assign-driver/' + orderId);
+    
+    // Kiểm tra nếu đơn hàng đang vận chuyển đến kho khác
+    if (toWarehouseId && toWarehouseId !== null && toWarehouseId !== 'null') {
+        $('#orderToWarehouseWarning').removeClass('d-none');
+        $('#driverSelectHint').html('<strong>Lưu ý:</strong> Chỉ chọn <strong>tài xế vận chuyển tỉnh</strong> vì kho đích chưa nhận được hàng.');
+        
+        // Lọc chỉ hiển thị tài xế vận chuyển tỉnh
+        $('#driverSelect option').each(function() {
+            const driverType = $(this).data('driver-type');
+            if (driverType !== 'intercity_driver' && $(this).val() !== '') {
+                $(this).hide();
+            } else {
+                $(this).show();
+            }
+        });
+    } else {
+        $('#orderToWarehouseWarning').addClass('d-none');
+        $('#driverSelectHint').text('Chọn tài xế để giao hàng cho khách hàng.');
+        
+        // Hiển thị tất cả tài xế
+        $('#driverSelect option').show();
+    }
+    
+    // Reset selection
+    $('#driverSelect').val('');
+    
     $('#assignDriverModal').modal('show');
 }
 

@@ -50,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('warehouses', WarehouseController::class);
     Route::post('warehouses/receive-order', [WarehouseController::class, 'receiveOrder']);
     Route::post('warehouses/release-order', [WarehouseController::class, 'releaseOrder']);
+    Route::post('warehouses/ship-to-warehouse', [WarehouseController::class, 'shipToWarehouse']);
     Route::get('warehouses/{id}/inventory', [WarehouseController::class, 'getInventory']);
     Route::get('warehouses/{id}/transactions', [WarehouseController::class, 'getTransactions']);
 
@@ -81,6 +82,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('monthly', [ReportController::class, 'monthly']);
         Route::get('driver-performance', [ReportController::class, 'driverPerformance']);
         Route::get('warehouse', [ReportController::class, 'warehouse']);
+        Route::get('warehouses-overview', [ReportController::class, 'warehousesOverview']);
         Route::get('revenue', [ReportController::class, 'revenue']);
     });
 

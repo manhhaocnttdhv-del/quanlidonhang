@@ -14,18 +14,33 @@ class WarehouseController extends Controller
      */
     public function index(Request $request)
     {
-        // Tự động redirect đến kho mặc định (Nghệ An)
-        $defaultWarehouse = Warehouse::getDefaultWarehouse();
-        
-        if ($defaultWarehouse && !$request->expectsJson()) {
-            return redirect()->route('admin.warehouses.show', $defaultWarehouse->id);
+        $user = auth()->user();
+
+        // Super admin và admin xem tất cả kho
+        if ($user->canManageWarehouses()) {
+            $warehouses = Warehouse::where('is_active', true)
+                ->orderByRaw("CASE WHEN province = 'Nghệ An' THEN 0 ELSE 1 END")
+                ->orderBy('name')
+                ->get();
+        } else {
+            // Warehouse admin chỉ xem kho của mình
+            $warehouses = Warehouse::where('id', $user->warehouse_id)
+                ->where('is_active', true)
+                ->get();
+            
+            // Nếu chỉ có 1 kho, tự động redirect
+            if ($warehouses->count() === 1 && !$request->expectsJson()) {
+                return redirect()->route('admin.warehouses.show', $warehouses->first()->id);
+            }
         }
-        
-        // Nếu không có kho mặc định, hiển thị danh sách
-        $warehouses = Warehouse::where('is_active', true)
-            ->orderByRaw("CASE WHEN province = 'Nghệ An' THEN 0 ELSE 1 END")
-            ->orderBy('name')
-            ->get();
+
+        // Tự động redirect đến kho mặc định (Nghệ An) nếu là super admin/admin
+        if ($user->canManageWarehouses() && !$request->expectsJson()) {
+            $defaultWarehouse = Warehouse::getDefaultWarehouse();
+            if ($defaultWarehouse) {
+                return redirect()->route('admin.warehouses.show', $defaultWarehouse->id);
+            }
+        }
         
         if ($request->expectsJson()) {
             return response()->json($warehouses);
@@ -35,23 +50,73 @@ class WarehouseController extends Controller
     }
 
     /**
+     * Show the form for creating a new resource.
+     */
+    public function create()
+    {
+        // Chỉ super admin và admin mới được tạo kho
+        if (!auth()->user()->canManageWarehouses()) {
+            return redirect()->route('admin.warehouses.index')->with('error', 'Bạn không có quyền tạo kho');
+        }
+
+        // Lấy danh sách users có thể làm admin kho (chưa có kho hoặc không phải warehouse_admin)
+        $availableUsers = \App\Models\User::where('is_active', true)
+            ->where(function($query) {
+                $query->whereNull('warehouse_id')
+                      ->orWhere('role', '!=', 'warehouse_admin');
+            })
+            ->where('role', '!=', 'super_admin')
+            ->orderBy('name')
+            ->get();
+
+        // Lấy danh sách tỉnh/thành phố từ database
+        $provinces = \App\Models\Province::orderBy('name')->get();
+
+        return view('admin.warehouses.create', compact('availableUsers', 'provinces'));
+    }
+
+    /**
      * Store a newly created resource in storage.
      */
     public function store(Request $request)
     {
+        // Kiểm tra quyền: chỉ super_admin và admin mới được tạo kho
+        if (!auth()->user()->canManageWarehouses()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Bạn không có quyền tạo kho'], 403);
+            }
+            return redirect()->back()->with('error', 'Bạn không có quyền tạo kho');
+        }
+
         $validated = $request->validate([
             'code' => 'required|string|unique:warehouses,code',
             'name' => 'required|string|max:255',
             'address' => 'required|string',
-            'province' => 'nullable|string|max:255',
-            'district' => 'nullable|string|max:255',
-            'ward' => 'nullable|string|max:255',
+            'province' => 'required|string|max:255', // Tên tỉnh/thành phố
+            'province_code' => 'nullable|string|max:10', // Mã tỉnh/thành phố
+            'ward' => 'nullable|string|max:255', // Tên phường/xã
+            'ward_code' => 'nullable|string|max:20', // Mã phường/xã
             'phone' => 'nullable|string|max:20',
             'manager_name' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
+            'admin_user_id' => 'nullable|exists:users,id', // ID của user sẽ làm admin kho
         ]);
 
         $warehouse = Warehouse::create($validated);
+
+        // Nếu có chọn admin, gán user làm admin kho và cập nhật tên quản lý
+        if (!empty($validated['admin_user_id'])) {
+            $adminUser = \App\Models\User::findOrFail($validated['admin_user_id']);
+            $adminUser->update([
+                'role' => 'warehouse_admin',
+                'warehouse_id' => $warehouse->id,
+            ]);
+            
+            // Cập nhật tên quản lý = tên admin kho
+            $warehouse->update([
+                'manager_name' => $adminUser->name
+            ]);
+        }
 
         if ($request->expectsJson()) {
             return response()->json([
@@ -60,7 +125,11 @@ class WarehouseController extends Controller
             ], 201);
         }
         
-        return redirect()->route('admin.warehouses.index')->with('success', 'Kho đã được tạo thành công');
+        $message = 'Kho đã được tạo thành công';
+        if (!empty($validated['admin_user_id'])) {
+            $message .= ' và đã gán admin kho';
+        }
+        return redirect()->route('admin.warehouses.show', $warehouse->id)->with('success', $message);
     }
 
     /**
@@ -69,6 +138,13 @@ class WarehouseController extends Controller
     public function show(Request $request, string $id)
     {
         $warehouse = Warehouse::with(['orders', 'drivers'])->findOrFail($id);
+        
+        // Đơn hàng đang đến kho (in_transit với to_warehouse_id = kho này)
+        $ordersIncoming = Order::where('to_warehouse_id', $id)
+            ->where('status', 'in_transit')
+            ->with(['customer', 'route', 'warehouse', 'pickupDriver'])
+            ->orderBy('updated_at', 'desc')
+            ->get();
         
         // Tất cả đơn hàng trong kho
         $allOrdersQuery = Order::where('warehouse_id', $id)
@@ -163,11 +239,42 @@ class WarehouseController extends Controller
             ->get()
             ->keyBy('to_province'); // Key by to_province để dễ tìm
         
+        // Lấy danh sách kho khác (để chọn khi xuất hàng đi kho khác)
+        $otherWarehouses = Warehouse::where('id', '!=', $id)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+        
+        // Lấy danh sách tài xế vận chuyển tỉnh (để chọn khi xuất hàng đi kho khác)
+        $intercityDrivers = \App\Models\Driver::where('driver_type', 'intercity_driver')
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+        
         if ($request->expectsJson()) {
             return response()->json($warehouse);
         }
         
-        return view('admin.warehouses.show', compact('warehouse', 'inventory', 'routes', 'routesFromNgheAn'));
+        return view('admin.warehouses.show', compact('warehouse', 'inventory', 'routes', 'routesFromNgheAn', 'ordersIncoming', 'otherWarehouses', 'intercityDrivers'));
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(string $id)
+    {
+        $warehouse = Warehouse::findOrFail($id);
+
+        // Kiểm tra quyền
+        $user = auth()->user();
+        if (!$user->canManageWarehouses() && !$user->isAdminOfWarehouse($warehouse->id)) {
+            return redirect()->route('admin.warehouses.index')->with('error', 'Bạn không có quyền sửa kho này');
+        }
+
+        // Load danh sách tỉnh/thành phố từ database
+        $provinces = \App\Models\Province::orderBy('name')->get();
+
+        return view('admin.warehouses.edit', compact('warehouse', 'provinces'));
     }
 
     /**
@@ -177,9 +284,22 @@ class WarehouseController extends Controller
     {
         $warehouse = Warehouse::findOrFail($id);
 
+        // Kiểm tra quyền: super_admin/admin có thể sửa tất cả, warehouse_admin chỉ sửa được kho của mình
+        $user = auth()->user();
+        if (!$user->canManageWarehouses() && !$user->isAdminOfWarehouse($warehouse->id)) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Bạn không có quyền cập nhật kho này'], 403);
+            }
+            return redirect()->back()->with('error', 'Bạn không có quyền cập nhật kho này');
+        }
+
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'address' => 'sometimes|string',
+            'province' => 'nullable|string|max:255', // Tên tỉnh/thành phố
+            'province_code' => 'nullable|string|max:10', // Mã tỉnh/thành phố
+            'ward' => 'nullable|string|max:255', // Tên phường/xã
+            'ward_code' => 'nullable|string|max:20', // Mã phường/xã
             'phone' => 'nullable|string|max:20',
             'manager_name' => 'nullable|string|max:255',
             'is_active' => 'sometimes|boolean',
@@ -188,10 +308,14 @@ class WarehouseController extends Controller
 
         $warehouse->update($validated);
 
-        return response()->json([
-            'message' => 'Kho đã được cập nhật',
-            'data' => $warehouse->fresh(),
-        ]);
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'Kho đã được cập nhật',
+                'data' => $warehouse->fresh(),
+            ]);
+        }
+
+        return redirect()->route('admin.warehouses.show', $warehouse->id)->with('success', 'Kho đã được cập nhật');
     }
 
     /**
@@ -212,10 +336,13 @@ class WarehouseController extends Controller
         // Use default warehouse (Nghệ An) if not specified
         $warehouseId = $validated['warehouse_id'] ?? Warehouse::getDefaultWarehouse()->id ?? null;
         
-        // Lấy thông tin kho gửi (nếu có)
+        // Lấy thông tin kho gửi (tự động từ order nếu có)
         $fromWarehouse = null;
         if ($validated['from_warehouse_id'] ?? null) {
             $fromWarehouse = Warehouse::find($validated['from_warehouse_id']);
+        } elseif ($order->warehouse_id) {
+            // Nếu không chỉ định from_warehouse_id nhưng order có warehouse_id, dùng warehouse_id
+            $fromWarehouse = Warehouse::find($order->warehouse_id);
         }
 
         // Tạo ghi chú
@@ -226,9 +353,15 @@ class WarehouseController extends Controller
             $notes = 'Nhận từ kho khác';
         }
 
+        // Lưu lại tài xế vận chuyển tỉnh (nếu có) trước khi cập nhật
+        $intercityDriverId = $order->delivery_driver_id;
+        
         $order->update([
             'warehouse_id' => $warehouseId,
             'status' => 'in_warehouse',
+            'to_warehouse_id' => null, // Xóa to_warehouse_id khi đã nhận vào kho
+            // Giữ nguyên delivery_driver_id để lưu lịch sử tài xế vận chuyển tỉnh
+            // Sau này kho đích sẽ phân công tài xế shipper mới (có thể ghi đè delivery_driver_id)
         ]);
 
         WarehouseTransaction::create([
@@ -242,11 +375,20 @@ class WarehouseController extends Controller
         ]);
 
         // Tạo trạng thái đơn hàng
+        $statusNotes = $notes;
+        if ($intercityDriverId) {
+            $intercityDriver = \App\Models\Driver::find($intercityDriverId);
+            if ($intercityDriver) {
+                $statusNotes .= " - Tài xế vận chuyển: {$intercityDriver->name}";
+            }
+        }
+        
         \App\Models\OrderStatus::create([
             'order_id' => $order->id,
             'status' => 'in_warehouse',
-            'notes' => $notes,
+            'notes' => $statusNotes . " - Kho đích đã nhận được hàng. Có thể phân công tài xế shipper để giao hàng cho khách hàng.",
             'warehouse_id' => $warehouseId,
+            'driver_id' => $intercityDriverId, // Lưu tài xế vận chuyển tỉnh vào lịch sử
             'updated_by' => auth()->id(),
         ]);
 
@@ -302,13 +444,17 @@ class WarehouseController extends Controller
             $order->update(['route_id' => $routeId]);
         }
 
-        $order->update(['status' => 'in_transit']);
+        // Xuất cho shipper giao hàng (không set to_warehouse_id)
+        $order->update([
+            'status' => 'out_for_delivery',
+            'to_warehouse_id' => null, // Đảm bảo không có to_warehouse_id
+        ]);
 
         // Create order status
         \App\Models\OrderStatus::create([
             'order_id' => $order->id,
-            'status' => 'in_transit',
-            'notes' => $validated['notes'] ?? 'Đã xuất kho, đang vận chuyển',
+            'status' => 'out_for_delivery',
+            'notes' => $validated['notes'] ?? 'Đã xuất kho cho shipper giao hàng',
             'warehouse_id' => $warehouseId,
             'updated_by' => auth()->id(),
         ]);
@@ -335,7 +481,113 @@ class WarehouseController extends Controller
     }
 
     /**
-     * Bulk release orders from warehouse
+     * Ship order to another warehouse (vận chuyển giữa các kho)
+     */
+    public function shipToWarehouse(Request $request)
+    {
+        $validated = $request->validate([
+            'warehouse_id' => 'nullable|exists:warehouses,id',
+            'order_ids' => 'required',
+            'to_warehouse_id' => 'required|exists:warehouses,id',
+            'intercity_driver_id' => 'nullable|exists:drivers,id',
+            'reference_number' => 'nullable|string',
+            'notes' => 'nullable|string',
+        ]);
+
+        // Parse JSON if order_ids is a string
+        $orderIds = is_string($validated['order_ids']) 
+            ? json_decode($validated['order_ids'], true) 
+            : (is_array($validated['order_ids']) ? $validated['order_ids'] : []);
+
+        if (!is_array($orderIds) || empty($orderIds)) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Vui lòng chọn ít nhất một đơn hàng'], 400);
+            }
+            return redirect()->back()->with('error', 'Vui lòng chọn ít nhất một đơn hàng');
+        }
+
+        // Kiểm tra tài xế vận chuyển tỉnh (nếu có)
+        if ($validated['intercity_driver_id'] ?? null) {
+            $driver = \App\Models\Driver::find($validated['intercity_driver_id']);
+            if ($driver && !$driver->isIntercityDriver()) {
+                if ($request->expectsJson()) {
+                    return response()->json(['message' => 'Tài xế được chọn không phải là tài xế vận chuyển tỉnh'], 400);
+                }
+                return redirect()->back()->with('error', 'Tài xế được chọn không phải là tài xế vận chuyển tỉnh');
+            }
+        }
+
+        $fromWarehouseId = $validated['warehouse_id'] ?? Warehouse::getDefaultWarehouse()->id ?? null;
+        $toWarehouse = Warehouse::findOrFail($validated['to_warehouse_id']);
+
+        $orders = Order::whereIn('id', $orderIds)
+            ->where('status', 'in_warehouse')
+            ->where('warehouse_id', $fromWarehouseId)
+            ->get();
+
+        if ($orders->isEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Không có đơn hàng nào hợp lệ để vận chuyển'], 400);
+            }
+            return redirect()->back()->with('error', 'Không có đơn hàng nào hợp lệ để vận chuyển');
+        }
+
+        $successCount = 0;
+        $failedCount = 0;
+
+        foreach ($orders as $order) {
+            try {
+                // Cập nhật đơn hàng: status = in_transit, to_warehouse_id = kho đích
+                $order->update([
+                    'status' => 'in_transit',
+                    'to_warehouse_id' => $validated['to_warehouse_id'],
+                ]);
+
+                // Tạo order status
+                $notes = $validated['notes'] ?? "Đã xuất kho đi {$toWarehouse->name} ({$toWarehouse->province})";
+                if ($validated['intercity_driver_id'] ?? null) {
+                    $driver = \App\Models\Driver::find($validated['intercity_driver_id']);
+                    $notes .= " - Tài xế: {$driver->name}";
+                }
+
+                \App\Models\OrderStatus::create([
+                    'order_id' => $order->id,
+                    'status' => 'in_transit',
+                    'notes' => $notes,
+                    'warehouse_id' => $fromWarehouseId,
+                    'driver_id' => $validated['intercity_driver_id'] ?? null,
+                    'updated_by' => auth()->id(),
+                ]);
+
+                // Tạo warehouse transaction (xuất kho)
+                WarehouseTransaction::create([
+                    'warehouse_id' => $fromWarehouseId,
+                    'order_id' => $order->id,
+                    'type' => 'out',
+                    'reference_number' => $validated['reference_number'] ?? null,
+                    'notes' => "Xuất kho vận chuyển đến {$toWarehouse->name}",
+                    'transaction_date' => now(),
+                    'created_by' => auth()->id(),
+                ]);
+
+                $successCount++;
+            } catch (\Exception $e) {
+                $failedCount++;
+            }
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => "Đã xuất {$successCount} đơn hàng đi {$toWarehouse->name}" . ($failedCount > 0 ? ", {$failedCount} đơn thất bại" : ''),
+                'data' => ['success' => $successCount, 'failed' => $failedCount],
+            ]);
+        }
+
+        return redirect()->back()->with('success', "Đã xuất {$successCount} đơn hàng đi {$toWarehouse->name}" . ($failedCount > 0 ? ", {$failedCount} đơn thất bại" : ''));
+    }
+
+    /**
+     * Bulk release orders from warehouse (xuất cho shipper giao hàng)
      */
     public function bulkReleaseOrder(Request $request)
     {
@@ -395,13 +647,17 @@ class WarehouseController extends Controller
                     $order->update(['route_id' => $routeId]);
                 }
 
-                $order->update(['status' => 'in_transit']);
+                // Xuất cho shipper giao hàng (không set to_warehouse_id)
+                $order->update([
+                    'status' => 'out_for_delivery',
+                    'to_warehouse_id' => null, // Đảm bảo không có to_warehouse_id
+                ]);
 
                 // Create order status
                 \App\Models\OrderStatus::create([
                     'order_id' => $order->id,
-                    'status' => 'in_transit',
-                    'notes' => $validated['notes'] ?? 'Đã xuất kho hàng loạt, đang vận chuyển',
+                    'status' => 'out_for_delivery',
+                    'notes' => $validated['notes'] ?? 'Đã xuất kho cho shipper giao hàng',
                     'warehouse_id' => $warehouseId,
                     'updated_by' => auth()->id(),
                 ]);

@@ -32,6 +32,7 @@ class DriverSeeder extends Seeder
                 'vehicle_number' => '37A-12345',
                 'area' => 'Thành phố Vinh, Nghệ An',
                 'warehouse_id' => $ngheAnWarehouse->id,
+                'driver_type' => 'shipper',
                 'is_active' => true,
             ],
             [
@@ -44,6 +45,7 @@ class DriverSeeder extends Seeder
                 'vehicle_number' => '37B-23456',
                 'area' => 'Thành phố Vinh, Nghệ An',
                 'warehouse_id' => $ngheAnWarehouse->id,
+                'driver_type' => 'shipper',
                 'is_active' => true,
             ],
             [
@@ -52,10 +54,11 @@ class DriverSeeder extends Seeder
                 'phone' => '0913333333',
                 'email' => 'taixe3@smartpost.com',
                 'license_number' => 'NA-345678',
-                'vehicle_type' => 'Xe tải nhỏ',
+                'vehicle_type' => 'Xe tải lớn',
                 'vehicle_number' => '37C-34567',
-                'area' => 'Thành phố Vinh, Nghệ An',
+                'area' => 'Vận chuyển các tỉnh',
                 'warehouse_id' => $ngheAnWarehouse->id,
+                'driver_type' => 'intercity_driver',
                 'is_active' => true,
             ],
             [
@@ -68,6 +71,7 @@ class DriverSeeder extends Seeder
                 'vehicle_number' => '37D-45678',
                 'area' => 'Thành phố Vinh, Nghệ An',
                 'warehouse_id' => $ngheAnWarehouse->id,
+                'driver_type' => 'shipper',
                 'is_active' => true,
             ],
         ];

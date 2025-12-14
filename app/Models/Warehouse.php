@@ -47,6 +47,11 @@ class Warehouse extends Model
         return $this->hasMany(OrderStatus::class);
     }
 
+    public function users()
+    {
+        return $this->hasMany(User::class);
+    }
+
     /**
      * Get default warehouse (Nghệ An)
      */

@@ -61,11 +61,19 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     
     // Warehouses
     Route::get('/warehouses', [WarehouseController::class, 'index'])->name('warehouses.index');
+    Route::get('/warehouses/create', [WarehouseController::class, 'create'])->name('warehouses.create');
     Route::post('/warehouses', [WarehouseController::class, 'store'])->name('warehouses.store');
     Route::get('/warehouses/{id}', [WarehouseController::class, 'show'])->name('warehouses.show');
+    Route::get('/warehouses/{id}/edit', [WarehouseController::class, 'edit'])->name('warehouses.edit');
+    Route::put('/warehouses/{id}', [WarehouseController::class, 'update'])->name('warehouses.update');
     Route::post('/warehouses/receive-order', [WarehouseController::class, 'receiveOrder'])->name('warehouses.receive-order');
     Route::post('/warehouses/release-order', [WarehouseController::class, 'releaseOrder'])->name('warehouses.release-order');
+    Route::post('/warehouses/ship-to-warehouse', [WarehouseController::class, 'shipToWarehouse'])->name('warehouses.ship-to-warehouse');
     Route::post('/warehouses/bulk-release-order', [WarehouseController::class, 'bulkReleaseOrder'])->name('warehouses.bulk-release-order');
+    
+    // Users (chỉ super admin)
+    Route::resource('users', \App\Http\Controllers\Admin\UserController::class)->except(['destroy']);
+    Route::delete('/users/{id}', [\App\Http\Controllers\Admin\UserController::class, 'destroy'])->name('users.destroy');
     
     // Delivery
     Route::get('/delivery', [DeliveryController::class, 'index'])->name('delivery.index');
@@ -83,6 +91,7 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     
     // Reports
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('/reports/warehouses-overview', [ReportController::class, 'warehousesOverview'])->name('reports.warehouses-overview');
     
     // COD Reconciliations
     Route::get('/cod-reconciliations', [CodReconciliationController::class, 'index'])->name('cod-reconciliations.index');
@@ -99,4 +108,24 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     Route::get('/routes', [RouteController::class, 'index'])->name('routes.index');
     Route::post('/routes', [RouteController::class, 'store'])->name('routes.store');
     Route::get('/routes/{id}', [RouteController::class, 'show'])->name('routes.show');
+    
+    // Address - Địa chỉ
+    Route::get('/api/wards', function (\Illuminate\Http\Request $request) {
+        $provinceCode = $request->get('province_code');
+        
+        if (!$provinceCode) {
+            return response()->json(['error' => 'province_code is required'], 400);
+        }
+        
+        $wards = \App\Models\Ward::where('province_code', $provinceCode)
+            ->orderBy('ward_name')
+            ->get(['ward_code', 'ward_name', 'province_code']);
+        
+        return response()->json($wards);
+    })->name('api.wards');
+    
+    Route::get('/api/provinces', function () {
+        $provinces = \App\Models\Province::orderBy('name')->get(['province_code', 'name']);
+        return response()->json($provinces);
+    })->name('api.provinces');
 });

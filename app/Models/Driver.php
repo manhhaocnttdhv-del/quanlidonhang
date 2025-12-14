@@ -20,6 +20,7 @@ class Driver extends Model
         'vehicle_number',
         'area',
         'warehouse_id',
+        'driver_type',
         'is_active',
         'notes',
     ];
@@ -46,5 +47,21 @@ class Driver extends Model
     public function orderStatuses()
     {
         return $this->hasMany(OrderStatus::class);
+    }
+
+    /**
+     * Check if driver is shipper
+     */
+    public function isShipper(): bool
+    {
+        return $this->driver_type === 'shipper';
+    }
+
+    /**
+     * Check if driver is intercity driver
+     */
+    public function isIntercityDriver(): bool
+    {
+        return $this->driver_type === 'intercity_driver';
     }
 }
