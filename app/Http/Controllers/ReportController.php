@@ -20,27 +20,162 @@ class ReportController extends Controller
         $dateFrom = $request->get('date_from', date('Y-m-d', strtotime('-30 days')));
         $dateTo = $request->get('date_to', date('Y-m-d'));
         
+        $user = auth()->user();
+        $warehouseFilter = null;
+        if ($user && $user->isWarehouseAdmin() && $user->warehouse_id) {
+            $warehouseFilter = $user->warehouse_id;
+        }
+        
+        // Lấy tất cả đơn hàng: có warehouse_id = kho này HOẶC có transaction 'out' từ kho này
+        $dailyStatsQuery = Order::whereDate('created_at', today());
+        if ($warehouseFilter) {
+            $dailyStatsQuery->where(function($q) use ($warehouseFilter) {
+                $q->where('warehouse_id', $warehouseFilter)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                      $transQ->where('warehouse_id', $warehouseFilter)
+                            ->where('type', 'out');
+                  });
+            });
+        }
+        
+        // Tính doanh thu dựa trên kho gửi (từ transaction 'out' đầu tiên) hoặc warehouse_id hiện tại
+        // Lấy tất cả đơn hàng đã giao trong ngày
+        $deliveredOrdersQuery = Order::where('status', 'delivered')
+            ->whereDate('delivered_at', today());
+        
+        // Lọc theo kho gửi: tìm transaction 'out' đầu tiên của mỗi đơn hàng
+        if ($warehouseFilter) {
+            $deliveredOrdersQuery->where(function($q) use ($warehouseFilter) {
+                // Đơn hàng có warehouse_id = kho này
+                $q->where('warehouse_id', $warehouseFilter)
+                  // HOẶC có transaction 'out' từ kho này (kho gửi)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                      $transQ->where('warehouse_id', $warehouseFilter)
+                            ->where('type', 'out');
+                  });
+            });
+        }
+        
+        $deliveredOrders = $deliveredOrdersQuery->get();
+        
+        // Lọc lại để chỉ lấy đơn hàng có kho gửi = kho filter
+        if ($warehouseFilter) {
+            $deliveredOrders = $deliveredOrders->filter(function($order) use ($warehouseFilter) {
+                // Nếu warehouse_id = kho filter, tính cho kho này
+                if ($order->warehouse_id == $warehouseFilter) {
+                    return true;
+                }
+                // Nếu có transaction 'out' từ kho filter, tính cho kho này
+                $firstOutTransaction = WarehouseTransaction::where('order_id', $order->id)
+                    ->where('type', 'out')
+                    ->orderBy('transaction_date', 'asc')
+                    ->first();
+                return $firstOutTransaction && $firstOutTransaction->warehouse_id == $warehouseFilter;
+            });
+        }
+        
+        // Lấy tất cả đơn hàng để đếm total_orders (bao gồm cả đơn hàng xuất kho)
+        $allDailyOrders = $dailyStatsQuery->get();
+        if ($warehouseFilter) {
+            $allDailyOrders = $allDailyOrders->filter(function($order) use ($warehouseFilter) {
+                if ($order->warehouse_id == $warehouseFilter) {
+                    return true;
+                }
+                $firstOutTransaction = WarehouseTransaction::where('order_id', $order->id)
+                    ->where('type', 'out')
+                    ->orderBy('transaction_date', 'asc')
+                    ->first();
+                return $firstOutTransaction && $firstOutTransaction->warehouse_id == $warehouseFilter;
+            });
+        }
+        
+        // Lấy đơn hàng thất bại (bao gồm cả đơn hàng xuất kho)
+        $failedOrdersQuery = Order::where('status', 'failed')
+            ->whereDate('updated_at', today());
+        if ($warehouseFilter) {
+            $failedOrdersQuery->where(function($q) use ($warehouseFilter) {
+                $q->where('warehouse_id', $warehouseFilter)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                      $transQ->where('warehouse_id', $warehouseFilter)
+                            ->where('type', 'out');
+                  });
+            });
+        }
+        $failedOrders = $failedOrdersQuery->get();
+        if ($warehouseFilter) {
+            $failedOrders = $failedOrders->filter(function($order) use ($warehouseFilter) {
+                if ($order->warehouse_id == $warehouseFilter) {
+                    return true;
+                }
+                $firstOutTransaction = WarehouseTransaction::where('order_id', $order->id)
+                    ->where('type', 'out')
+                    ->orderBy('transaction_date', 'asc')
+                    ->first();
+                return $firstOutTransaction && $firstOutTransaction->warehouse_id == $warehouseFilter;
+            });
+        }
+        
         $dailyStats = [
-            'total_orders' => Order::whereDate('created_at', today())->count(),
-            'delivered_orders' => Order::where('status', 'delivered')
-                ->whereDate('delivered_at', today())
-                ->count(),
-            'failed_orders' => Order::where('status', 'failed')
-                ->whereDate('updated_at', today())
-                ->count(),
-            'total_revenue' => Order::whereDate('created_at', today())->sum('shipping_fee'), // Chỉ tính phí vận chuyển, không bao gồm COD
+            'total_orders' => $allDailyOrders->count(),
+            'delivered_orders' => $deliveredOrders->count(),
+            'failed_orders' => $failedOrders->count(),
+            // Doanh thu = COD đã thu (cod_collected) + Phí vận chuyển (chỉ tính đơn hàng đã giao thành công)
+            'total_revenue' => $deliveredOrders->sum(function($order) {
+                return ($order->cod_collected ?? $order->cod_amount ?? 0) + ($order->shipping_fee ?? 0);
+            }),
         ];
         
-        $reportData = Order::whereBetween('created_at', [$dateFrom, $dateTo])
-            ->selectRaw('DATE(created_at) as date, COUNT(*) as total_orders, 
-                SUM(CASE WHEN status = "delivered" THEN 1 ELSE 0 END) as delivered_orders,
-                SUM(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed_orders,
-                SUM(shipping_fee) as total_revenue,
-                SUM(cod_amount) as cod_amount,
-                SUM(shipping_fee) + SUM(cod_amount) as total_revenue_with_cod')
-            ->groupBy('date')
-            ->orderBy('date', 'desc')
-            ->get();
+        // Lấy tất cả đơn hàng trong khoảng thời gian: có warehouse_id = kho này HOẶC có transaction 'out' từ kho này
+        $reportDataQuery = Order::whereBetween('created_at', [$dateFrom, $dateTo]);
+        if ($warehouseFilter) {
+            $reportDataQuery->where(function($q) use ($warehouseFilter) {
+                $q->where('warehouse_id', $warehouseFilter)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                      $transQ->where('warehouse_id', $warehouseFilter)
+                            ->where('type', 'out');
+                  });
+            });
+        }
+        
+        // Tính báo cáo dựa trên kho gửi (từ transaction 'out' đầu tiên) hoặc warehouse_id hiện tại
+        // Lấy tất cả đơn hàng trong khoảng thời gian
+        $allOrders = $reportDataQuery->get();
+        
+        // Lọc lại để chỉ lấy đơn hàng có kho gửi = kho filter (nếu có)
+        if ($warehouseFilter) {
+            $allOrders = $allOrders->filter(function($order) use ($warehouseFilter) {
+                // Nếu warehouse_id = kho filter, tính cho kho này
+                if ($order->warehouse_id == $warehouseFilter) {
+                    return true;
+                }
+                // Nếu có transaction 'out' từ kho filter, tính cho kho này
+                $firstOutTransaction = WarehouseTransaction::where('order_id', $order->id)
+                    ->where('type', 'out')
+                    ->orderBy('transaction_date', 'asc')
+                    ->first();
+                return $firstOutTransaction && $firstOutTransaction->warehouse_id == $warehouseFilter;
+            });
+        }
+        
+        // Nhóm theo ngày và tính toán
+        $reportData = $allOrders->groupBy(function($order) {
+            return $order->created_at->format('Y-m-d');
+        })->map(function($orders, $date) {
+            return [
+                'date' => $date,
+                'total_orders' => $orders->count(),
+                'delivered_orders' => $orders->where('status', 'delivered')->count(),
+                'failed_orders' => $orders->where('status', 'failed')->count(),
+                'total_revenue' => $orders->where('status', 'delivered')->sum(function($order) {
+                    return ($order->cod_collected ?? $order->cod_amount ?? 0) + ($order->shipping_fee ?? 0);
+                }),
+                'cod_collected' => $orders->where('status', 'delivered')->sum(function($order) {
+                    return $order->cod_collected ?? $order->cod_amount ?? 0;
+                }),
+                'shipping_fee' => $orders->where('status', 'delivered')->sum('shipping_fee'),
+                'cod_amount' => $orders->sum('cod_amount'),
+            ];
+        })->values()->sortByDesc('date');
         
         return view('admin.reports.index', compact('dailyStats', 'reportData'));
     }

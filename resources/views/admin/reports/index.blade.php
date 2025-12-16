@@ -37,9 +37,9 @@
             <div class="card-body">
                 <h6 class="card-subtitle mb-2">Doanh thu</h6>
                 <h3 class="mb-0">{{ number_format($dailyStats['total_revenue'] ?? 0) }} đ</h3>
-                <small>Hôm nay (Phí vận chuyển)</small>
+                <small>Hôm nay</small>
                 <small class="d-block mt-1" style="font-size: 0.75rem; opacity: 0.9;">
-                    <i class="fas fa-info-circle"></i> Chỉ tính phí vận chuyển, không bao gồm COD
+                    <i class="fas fa-info-circle"></i> COD đã thu + Phí vận chuyển
                 </small>
             </div>
         </div>
@@ -83,8 +83,9 @@
         <h5 class="mb-0">Chi tiết báo cáo</h5>
         <small class="text-muted">
             <i class="fas fa-info-circle me-1"></i>
-            <strong>Doanh thu</strong> = Tổng phí vận chuyển (shipping_fee) của tất cả đơn hàng. 
-            <strong>COD</strong> = Tổng tiền thu hộ (cod_amount), không tính vào doanh thu.
+            <strong>Doanh thu</strong> = COD đã thu (cod_collected) + Phí vận chuyển (shipping_fee) - Chỉ tính đơn hàng đã giao thành công. 
+            <strong>COD đã thu</strong> = Tổng tiền COD đã thu thực tế từ khách hàng (cod_collected). 
+            <strong>Tổng COD</strong> = Tổng tiền thu hộ cần thu (cod_amount) của tất cả đơn hàng.
         </small>
     </div>
     <div class="card-body">
@@ -96,9 +97,11 @@
                         <th>Số đơn</th>
                         <th>Đã giao</th>
                         <th>Thất bại</th>
-                        <th>Doanh thu (Phí VC)</th>
+                        <th>Doanh thu</th>
+                        <th>COD đã thu</th>
+                        <th>Phí VC</th>
                         <th>Tổng COD</th>
-                        <th>Tổng (Phí VC + COD)</th>
+                        <th>Tổng (Doanh thu + COD chưa thu)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -109,21 +112,29 @@
                         <td>{{ $row->delivered_orders ?? 0 }}</td>
                         <td>{{ $row->failed_orders ?? 0 }}</td>
                         <td>
-                            <strong>{{ number_format($row->shipping_revenue ?? $row->total_revenue ?? 0) }} đ</strong>
+                            <strong class="text-success">{{ number_format($row->total_revenue ?? 0) }} đ</strong>
+                            <br><small class="text-muted">COD đã thu + Phí VC</small>
+                        </td>
+                        <td>
+                            <strong>{{ number_format($row->cod_collected ?? 0) }} đ</strong>
+                            <br><small class="text-muted">COD đã thu</small>
+                        </td>
+                        <td>
+                            <strong>{{ number_format($row->shipping_fee ?? 0) }} đ</strong>
                             <br><small class="text-muted">Phí vận chuyển</small>
                         </td>
                         <td>
                             <strong>{{ number_format($row->cod_amount ?? 0) }} đ</strong>
-                            <br><small class="text-muted">Tiền thu hộ</small>
+                            <br><small class="text-muted">COD cần thu</small>
                         </td>
                         <td>
-                            <strong class="text-success">{{ number_format(($row->shipping_revenue ?? $row->total_revenue ?? 0) + ($row->cod_amount ?? 0)) }} đ</strong>
+                            <strong class="text-info">{{ number_format(($row->total_revenue ?? 0) + (($row->cod_amount ?? 0) - ($row->cod_collected ?? 0))) }} đ</strong>
                             <br><small class="text-muted">Tổng cộng</small>
                         </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="text-center">Không có dữ liệu</td>
+                        <td colspan="8" class="text-center">Không có dữ liệu</td>
                     </tr>
                     @endforelse
                 </tbody>

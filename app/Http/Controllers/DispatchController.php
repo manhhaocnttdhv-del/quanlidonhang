@@ -23,14 +23,52 @@ class DispatchController extends Controller
             ->orderBy('created_at', 'asc')
             ->get();
         
-        // Đơn hàng đã phân công tài xế (pickup_pending, picking_up)
-        $assignedOrders = Order::whereIn('status', ['pickup_pending', 'picking_up'])
-            ->with(['customer', 'route', 'pickupDriver'])
+        $user = auth()->user();
+        
+        // Đơn hàng chờ phân công - lọc theo kho
+        $pendingOrdersQuery = Order::where('status', 'pending')
+            ->with(['customer', 'route', 'pickupDriver']);
+        
+        // Warehouse admin chỉ xem đơn hàng của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $pendingOrdersQuery->where('warehouse_id', $user->warehouse_id);
+        }
+        
+        $pendingOrders = $pendingOrdersQuery->orderBy('created_at', 'asc')->get();
+        
+        // Đơn hàng đã phân công tài xế (pickup_pending, picking_up, picked_up)
+        // KHÔNG bao gồm đơn hàng đã về kho (in_warehouse) - đơn hàng đã về kho chỉ hiển thị trong "Kho của tôi"
+        $assignedOrdersQuery = Order::whereIn('status', ['pickup_pending', 'picking_up', 'picked_up'])
+            ->whereNotNull('pickup_driver_id') // Phải có tài xế được phân công
+            ->with(['customer', 'route', 'pickupDriver']);
+        
+        // Warehouse admin chỉ xem đơn hàng của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $assignedOrdersQuery->where(function($query) use ($user) {
+                // Đơn hàng trong kho của mình hoặc đang được tài xế của kho mình lấy
+                $query->where('warehouse_id', $user->warehouse_id)
+                      ->orWhereHas('pickupDriver', function($q) use ($user) {
+                          $q->where('warehouse_id', $user->warehouse_id);
+                      });
+            });
+        }
+        
+        $assignedOrders = $assignedOrdersQuery->orderByRaw("CASE 
+                WHEN status = 'pickup_pending' THEN 1 
+                WHEN status = 'picking_up' THEN 2 
+                WHEN status = 'picked_up' THEN 3 
+                ELSE 4 
+            END")
             ->orderBy('pickup_scheduled_at', 'asc')
             ->orderBy('created_at', 'asc')
             ->get();
             
-        $drivers = Driver::where('is_active', true)->get();
+        // Lấy tài xế theo kho
+        $driversQuery = Driver::where('is_active', true);
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $driversQuery->where('warehouse_id', $user->warehouse_id);
+        }
+        $drivers = $driversQuery->get();
         
         if ($request->expectsJson()) {
             return response()->json([
@@ -148,30 +186,44 @@ class DispatchController extends Controller
                 'updated_by' => auth()->id(),
             ]);
         } elseif ($validated['status'] === 'picked_up') {
-            // Tài xế đã lấy hàng - Tự động nhập kho Nghệ An
-            $defaultWarehouse = Warehouse::getDefaultWarehouse();
+            // Tài xế đã lấy hàng - Tự động nhập kho của tài xế
+            $driver = Driver::with('warehouse')->find($order->pickup_driver_id);
             
-            if (!$defaultWarehouse) {
+            // Xác định kho nhận hàng: ưu tiên kho của tài xế, nếu không có thì dùng kho mặc định
+            $targetWarehouse = null;
+            if ($driver && $driver->warehouse) {
+                // Tài xế có kho, đưa hàng về kho của tài xế
+                $targetWarehouse = $driver->warehouse;
+            } else {
+                // Tài xế không có kho, dùng kho mặc định
+                $targetWarehouse = Warehouse::getDefaultWarehouse();
+            }
+            
+            if (!$targetWarehouse) {
                 if ($request->expectsJson()) {
-                    return response()->json(['message' => 'Không tìm thấy kho mặc định (Nghệ An)'], 400);
+                    return response()->json(['message' => 'Không tìm thấy kho để nhập hàng'], 400);
                 }
-                return redirect()->back()->with('error', 'Không tìm thấy kho mặc định (Nghệ An)');
+                return redirect()->back()->with('error', 'Không tìm thấy kho để nhập hàng');
             }
 
             // Cập nhật đơn hàng: đã lấy hàng và về kho
             $order->update([
                 'picked_up_at' => now(),
                 'status' => 'in_warehouse',
-                'warehouse_id' => $defaultWarehouse->id,
+                'warehouse_id' => $targetWarehouse->id,
+                'to_warehouse_id' => null, // Đảm bảo không còn to_warehouse_id khi đã về kho
             ]);
 
             // Tạo giao dịch nhập kho
+            $driverName = $driver ? $driver->name : 'N/A';
+            $transactionNotes = $validated['notes'] ?? "Tự động nhập kho {$targetWarehouse->name} sau khi tài xế {$driverName} lấy hàng";
+            
             WarehouseTransaction::create([
-                'warehouse_id' => $defaultWarehouse->id,
+                'warehouse_id' => $targetWarehouse->id,
                 'order_id' => $order->id,
                 'type' => 'in',
                 'reference_number' => 'AUTO-' . date('YmdHis') . '-' . $order->tracking_number,
-                'notes' => $validated['notes'] ?? 'Tự động nhập kho sau khi tài xế lấy hàng',
+                'notes' => $transactionNotes,
                 'transaction_date' => now(),
                 'created_by' => auth()->id(),
             ]);
@@ -180,9 +232,9 @@ class DispatchController extends Controller
             OrderStatus::create([
                 'order_id' => $order->id,
                 'status' => 'in_warehouse',
-                'notes' => $validated['notes'] ?? "Đã lấy hàng và tự động nhập kho {$defaultWarehouse->name}",
+                'notes' => $validated['notes'] ?? "Đã lấy hàng và tự động nhập kho {$targetWarehouse->name}",
                 'driver_id' => $order->pickup_driver_id,
-                'warehouse_id' => $defaultWarehouse->id,
+                'warehouse_id' => $targetWarehouse->id,
                 'updated_by' => auth()->id(),
             ]);
         }
@@ -219,8 +271,14 @@ class DispatchController extends Controller
             return redirect()->back()->with('error', 'Vui lòng chọn ít nhất một đơn hàng');
         }
         
-        // Get all active drivers
-        $drivers = Driver::where('is_active', true)->get();
+        $user = auth()->user();
+        
+        // Get active drivers - lọc theo kho
+        $driversQuery = Driver::where('is_active', true);
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $driversQuery->where('warehouse_id', $user->warehouse_id);
+        }
+        $drivers = $driversQuery->get();
         
         if ($drivers->isEmpty()) {
             if ($request->expectsJson()) {
@@ -271,9 +329,15 @@ class DispatchController extends Controller
      */
     public function getAvailableDrivers(Request $request)
     {
+        $user = auth()->user();
         $area = $request->get('area');
 
         $query = Driver::where('is_active', true);
+        
+        // Warehouse admin chỉ xem tài xế của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $query->where('warehouse_id', $user->warehouse_id);
+        }
 
         if ($area) {
             $query->where('area', $area);

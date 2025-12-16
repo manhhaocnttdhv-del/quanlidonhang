@@ -67,6 +67,7 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     Route::get('/warehouses/{id}/edit', [WarehouseController::class, 'edit'])->name('warehouses.edit');
     Route::put('/warehouses/{id}', [WarehouseController::class, 'update'])->name('warehouses.update');
     Route::post('/warehouses/receive-order', [WarehouseController::class, 'receiveOrder'])->name('warehouses.receive-order');
+    Route::post('/warehouses/bulk-receive-order', [WarehouseController::class, 'bulkReceiveOrder'])->name('warehouses.bulk-receive-order');
     Route::post('/warehouses/release-order', [WarehouseController::class, 'releaseOrder'])->name('warehouses.release-order');
     Route::post('/warehouses/ship-to-warehouse', [WarehouseController::class, 'shipToWarehouse'])->name('warehouses.ship-to-warehouse');
     Route::post('/warehouses/bulk-release-order', [WarehouseController::class, 'bulkReleaseOrder'])->name('warehouses.bulk-release-order');
@@ -77,8 +78,10 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     
     // Delivery
     Route::get('/delivery', [DeliveryController::class, 'index'])->name('delivery.index');
+    Route::get('/delivery/delivered', [DeliveryController::class, 'deliveredOrders'])->name('delivery.delivered');
     Route::post('/delivery/assign-driver/{id}', [DeliveryController::class, 'assignDeliveryDriver'])->name('delivery.assign-driver');
     Route::post('/delivery/bulk-assign-driver', [DeliveryController::class, 'bulkAssignDeliveryDriver'])->name('delivery.bulk-assign-driver');
+    Route::post('/delivery/update-status/{id}', [DeliveryController::class, 'updateDeliveryStatus'])->name('delivery.update-status');
     
     // Tracking
     Route::get('/tracking', [TrackingController::class, 'index'])->name('tracking.index');
@@ -128,4 +131,34 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
         $provinces = \App\Models\Province::orderBy('name')->get(['province_code', 'name']);
         return response()->json($provinces);
     })->name('api.provinces');
+    
+    // Get warehouses by province
+    Route::get('/api/warehouses', function (\Illuminate\Http\Request $request) {
+        $province = $request->get('province');
+        
+        if (!$province) {
+            return response()->json(['error' => 'province is required'], 400);
+        }
+        
+        // Normalize province name để match với database
+        // "Thành phố Hồ Chí Minh" -> "Hồ Chí Minh"
+        // "Thành phố Hà Nội" -> "Hà Nội"
+        // "Tỉnh Đà Nẵng" -> "Đà Nẵng"
+        $normalizedProvince = $province;
+        $normalizedProvince = preg_replace('/^Thành phố\s+/', '', $normalizedProvince);
+        $normalizedProvince = preg_replace('/^Tỉnh\s+/', '', $normalizedProvince);
+        $normalizedProvince = trim($normalizedProvince);
+        
+        // Tìm kho với tên tỉnh đã normalize hoặc tên gốc
+        $warehouses = \App\Models\Warehouse::where('is_active', true)
+            ->where(function($query) use ($province, $normalizedProvince) {
+                $query->where('province', $province)
+                      ->orWhere('province', $normalizedProvince)
+                      ->orWhere('province', 'like', '%' . $normalizedProvince . '%');
+            })
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'address', 'province']);
+        
+        return response()->json($warehouses);
+    })->name('api.warehouses');
 });

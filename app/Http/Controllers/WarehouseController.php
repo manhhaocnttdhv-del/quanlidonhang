@@ -139,14 +139,23 @@ class WarehouseController extends Controller
     {
         $warehouse = Warehouse::with(['orders', 'drivers'])->findOrFail($id);
         
-        // Đơn hàng đang đến kho (in_transit với to_warehouse_id = kho này)
-        $ordersIncoming = Order::where('to_warehouse_id', $id)
-            ->where('status', 'in_transit')
-            ->with(['customer', 'route', 'warehouse', 'pickupDriver'])
-            ->orderBy('updated_at', 'desc')
-            ->get();
+        // Đơn hàng đang đến kho (in_transit với to_warehouse_id = kho này HOẶC đang vận chuyển đến tỉnh của kho này)
+        $ordersIncomingQuery = Order::where('status', 'in_transit')
+            ->with(['customer', 'route', 'warehouse', 'pickupDriver', 'deliveryDriver']);
         
-        // Tất cả đơn hàng trong kho
+        // Hiển thị đơn hàng đang vận chuyển đến kho này HOẶC đến tỉnh của kho này
+        if ($warehouse->province) {
+            $ordersIncomingQuery->where(function($q) use ($id, $warehouse) {
+                $q->where('to_warehouse_id', $id)
+                  ->orWhere('receiver_province', $warehouse->province);
+            });
+        } else {
+            $ordersIncomingQuery->where('to_warehouse_id', $id);
+        }
+        
+        $ordersIncoming = $ordersIncomingQuery->orderBy('updated_at', 'desc')->get();
+        
+        // Tất cả đơn hàng trong kho (status = 'in_warehouse')
         $allOrdersQuery = Order::where('warehouse_id', $id)
             ->where('status', 'in_warehouse')
             ->with(['customer', 'route', 'pickupDriver']);
@@ -158,32 +167,83 @@ class WarehouseController extends Controller
         
         $allOrders = $allOrdersQuery->orderBy('picked_up_at', 'desc')->get();
         
-        // Phân loại đơn hàng
+        // Lấy danh sách các đơn hàng có giao dịch nhập kho từ kho khác
+        $ordersReceivedFromWarehouses = \App\Models\WarehouseTransaction::where('warehouse_id', $id)
+            ->where('type', 'in')
+            ->where(function($q) {
+                $q->where('notes', 'like', '%Nhận từ%')
+                  ->orWhere('notes', 'like', '%Nhận từ kho%')
+                  ->orWhere('notes', 'like', '%từ kho%');
+            })
+            ->pluck('order_id')
+            ->toArray();
+        
+        // Đơn hàng từ kho khác tới - BAO GỒM cả đơn hàng đã phân công shipper (out_for_delivery) để có thể cập nhật giao hàng và tính doanh thu
+        $ordersFromOtherWarehousesQuery = Order::where('warehouse_id', $id)
+            ->whereIn('status', ['in_warehouse', 'out_for_delivery']) // Bao gồm cả đơn hàng đã phân công shipper
+            ->whereIn('id', $ordersReceivedFromWarehouses) // Chỉ lấy đơn hàng đã được nhận từ kho khác
+            ->with(['customer', 'route', 'pickupDriver', 'deliveryDriver']);
+        
+        // Filter theo tỉnh nếu có
+        if ($request->has('province') && $request->province) {
+            $ordersFromOtherWarehousesQuery->where('receiver_province', $request->province);
+        }
+        
+        $ordersFromOtherWarehouses = $ordersFromOtherWarehousesQuery->orderByRaw('CASE WHEN status = "in_warehouse" THEN 0 ELSE 1 END')
+            ->orderBy('updated_at', 'desc')
+            ->get();
+        
+        // Phân loại đơn hàng trong kho (chỉ status = 'in_warehouse')
         $ordersFromPickup = []; // Đơn hàng tài xế lấy từ người gửi
-        $ordersFromOtherWarehouses = []; // Đơn hàng từ kho khác gửi về
         
         foreach ($allOrders as $order) {
-            // Kiểm tra transaction nhập kho gần nhất
-            $lastInTransaction = WarehouseTransaction::where('warehouse_id', $id)
-                ->where('order_id', $order->id)
-                ->where('type', 'in')
-                ->orderBy('transaction_date', 'desc')
-                ->first();
-            
-            // Nếu có picked_up_at và transaction ghi "Tự động nhập kho sau khi tài xế lấy hàng" 
-            // hoặc có pickup_driver_id => đơn hàng từ tài xế lấy về
-            if ($order->picked_up_at && $order->pickup_driver_id) {
-                $ordersFromPickup[] = $order;
-            } else {
-                // Đơn hàng từ kho khác gửi về
-                $ordersFromOtherWarehouses[] = $order;
+            // Kiểm tra đơn hàng có được nhận từ kho khác không (qua WarehouseTransaction)
+            if (!in_array($order->id, $ordersReceivedFromWarehouses)) {
+                // Kiểm tra đơn hàng đã xuất kho chưa (có transaction 'out' từ kho hiện tại)
+                $hasOutTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
+                    ->where('warehouse_id', $id)
+                    ->where('type', 'out')
+                    ->whereDate('transaction_date', '>=', now()->subDays(30))
+                    ->exists();
+                
+                // CHỈ hiển thị đơn hàng:
+                // 1. Có pickup_driver_id (từ tài xế lấy về)
+                // 2. CHƯA xuất kho (không có transaction 'out' từ kho hiện tại)
+                // 3. CHƯA được phân công tài xế giao hàng (không có delivery_driver_id) - vì nếu đã phân công thì đã xuất kho hoặc sắp xuất kho
+                if ($order->pickup_driver_id && !$hasOutTransaction && !$order->delivery_driver_id) {
+                    // Đơn hàng từ tài xế lấy về: có pickup_driver_id, chưa xuất kho, và chưa phân công tài xế giao hàng
+                    $ordersFromPickup[] = $order;
+                }
             }
         }
         
+        // Filter theo tỉnh nếu có request (cho orders_from_pickup và orders_from_other_warehouses)
+        $ordersFromPickupFiltered = collect($ordersFromPickup);
+        $ordersFromOtherWarehousesFiltered = collect($ordersFromOtherWarehouses);
+        
+        if ($request->has('province') && $request->province) {
+            $ordersFromPickupFiltered = $ordersFromPickupFiltered->filter(function($order) use ($request) {
+                return $order->receiver_province == $request->province;
+            });
+            $ordersFromOtherWarehousesFiltered = $ordersFromOtherWarehousesFiltered->filter(function($order) use ($request) {
+                return $order->receiver_province == $request->province;
+            });
+        }
+        
+        // Đơn hàng đang giao hàng trong khu vực của kho này (tỉnh nhận trùng với tỉnh của kho)
+        $ordersBeingDelivered = Order::where('status', 'out_for_delivery')
+            ->where('receiver_province', $warehouse->province)
+            ->whereNotNull('delivery_driver_id')
+            ->with(['customer', 'deliveryDriver', 'warehouse'])
+            ->orderBy('delivery_scheduled_at', 'desc')
+            ->get();
+        
         $inventory = [
             'orders' => $allOrders,
-            'orders_from_pickup' => collect($ordersFromPickup),
-            'orders_from_other_warehouses' => collect($ordersFromOtherWarehouses),
+            'orders_incoming' => $ordersIncoming, // Đơn hàng đang đến kho (chưa nhận)
+            'orders_from_pickup' => $ordersFromPickupFiltered->values(),
+            'orders_from_other_warehouses' => $ordersFromOtherWarehousesFiltered->values(),
+            'orders_being_delivered' => $ordersBeingDelivered,
             'total_orders' => $allOrders->count(),
             'today_in' => WarehouseTransaction::where('warehouse_id', $id)
                 ->where('type', 'in')
@@ -227,6 +287,28 @@ class WarehouseController extends Controller
                 ->where('notes', 'not like', '%tài xế%')
                 ->where('notes', 'not like', '%Tự động nhập kho sau khi tài xế%')
                 ->with(['order.customer'])
+                ->orderBy('transaction_date', 'desc')
+                ->get(),
+            // Hàng vừa xuất hôm nay (tất cả giao dịch xuất kho)
+            'today_exported' => WarehouseTransaction::where('warehouse_id', $id)
+                ->where('type', 'out')
+                ->whereDate('transaction_date', today())
+                ->with(['order.customer', 'route', 'createdBy'])
+                ->orderBy('transaction_date', 'desc')
+                ->get(),
+            // Lịch sử xuất kho (7 ngày gần nhất, có thể filter theo request)
+            'exported_history' => WarehouseTransaction::where('warehouse_id', $id)
+                ->where('type', 'out')
+                ->when($request->has('export_date_from'), function($q) use ($request) {
+                    $q->whereDate('transaction_date', '>=', $request->export_date_from);
+                }, function($q) {
+                    // Mặc định 7 ngày gần nhất
+                    $q->whereDate('transaction_date', '>=', now()->subDays(7));
+                })
+                ->when($request->has('export_date_to'), function($q) use ($request) {
+                    $q->whereDate('transaction_date', '<=', $request->export_date_to);
+                })
+                ->with(['order.customer', 'route', 'createdBy'])
                 ->orderBy('transaction_date', 'desc')
                 ->get(),
         ];
@@ -333,22 +415,57 @@ class WarehouseController extends Controller
 
         $order = Order::findOrFail($validated['order_id']);
 
-        // Use default warehouse (Nghệ An) if not specified
-        $warehouseId = $validated['warehouse_id'] ?? Warehouse::getDefaultWarehouse()->id ?? null;
+        // Warehouse_id: ưu tiên từ request, nếu không có thì lấy từ kho của user đăng nhập (nếu là warehouse admin)
+        $user = auth()->user();
+        $warehouseId = $validated['warehouse_id'] ?? null;
         
-        // Lấy thông tin kho gửi (tự động từ order nếu có)
+        if (!$warehouseId && $user->isWarehouseAdmin() && $user->warehouse_id) {
+            $warehouseId = $user->warehouse_id;
+        }
+
+        if (!$warehouseId) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Vui lòng chỉ định kho nhận hàng'], 400);
+            }
+            return redirect()->back()->with('error', 'Vui lòng chỉ định kho nhận hàng');
+        }
+
+        // Kiểm tra kho nhận có tồn tại không
+        $warehouse = Warehouse::find($warehouseId);
+        if (!$warehouse) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Kho nhận không tồn tại'], 400);
+            }
+            return redirect()->back()->with('error', 'Kho nhận không tồn tại');
+        }
+        
+        // Lấy thông tin kho gửi
         $fromWarehouse = null;
-        if ($validated['from_warehouse_id'] ?? null) {
+        if (isset($validated['from_warehouse_id']) && $validated['from_warehouse_id']) {
             $fromWarehouse = Warehouse::find($validated['from_warehouse_id']);
-        } elseif ($order->warehouse_id) {
-            // Nếu không chỉ định from_warehouse_id nhưng order có warehouse_id, dùng warehouse_id
+        } elseif ($order->warehouse_id && $order->status === 'in_transit') {
+            // Nếu đơn hàng đang ở trạng thái in_transit, warehouse_id hiện tại là kho gửi
             $fromWarehouse = Warehouse::find($order->warehouse_id);
+        } elseif ($order->warehouse_id && $order->status !== 'in_transit') {
+            // Nếu không phải in_transit, có thể warehouse_id là kho hiện tại, cần kiểm tra lịch sử
+            // Tìm giao dịch xuất kho gần nhất từ một kho khác
+            $lastOutTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
+                ->where('type', 'out')
+                ->where('warehouse_id', '!=', $warehouseId)
+                ->orderBy('transaction_date', 'desc')
+                ->first();
+            if ($lastOutTransaction) {
+                $fromWarehouse = Warehouse::find($lastOutTransaction->warehouse_id);
+            } else {
+                // Fallback: dùng warehouse_id hiện tại
+                $fromWarehouse = Warehouse::find($order->warehouse_id);
+            }
         }
 
         // Tạo ghi chú
         $notes = $validated['notes'] ?? '';
         if ($fromWarehouse) {
-            $notes = ($notes ? $notes . ' - ' : '') . "Nhận từ {$fromWarehouse->name} ({$fromWarehouse->province})";
+            $notes = ($notes ? $notes . ' - ' : '') . "Nhận từ {$fromWarehouse->name}";
         } elseif (!$notes) {
             $notes = 'Nhận từ kho khác';
         }
@@ -383,10 +500,22 @@ class WarehouseController extends Controller
             }
         }
         
+        // Tạo OrderStatus với thông tin rõ ràng về việc nhận từ kho nào
+        $finalStatusNotes = $fromWarehouse 
+            ? "Đơn hàng từ kho {$fromWarehouse->name} ({$fromWarehouse->province}) vào kho {$warehouse->name}"
+            : "Đơn hàng từ kho khác vào kho {$warehouse->name}";
+        
+        if ($intercityDriverId) {
+            $intercityDriver = \App\Models\Driver::find($intercityDriverId);
+            if ($intercityDriver) {
+                $finalStatusNotes .= " - Tài xế vận chuyển: {$intercityDriver->name}";
+            }
+        }
+        
         \App\Models\OrderStatus::create([
             'order_id' => $order->id,
             'status' => 'in_warehouse',
-            'notes' => $statusNotes . " - Kho đích đã nhận được hàng. Có thể phân công tài xế shipper để giao hàng cho khách hàng.",
+            'notes' => $finalStatusNotes . " - Kho đích đã nhận được hàng. Có thể phân công tài xế shipper để giao hàng cho khách hàng.",
             'warehouse_id' => $warehouseId,
             'driver_id' => $intercityDriverId, // Lưu tài xế vận chuyển tỉnh vào lịch sử
             'updated_by' => auth()->id(),
@@ -400,6 +529,135 @@ class WarehouseController extends Controller
         }
         
         return redirect()->back()->with('success', 'Đơn hàng đã được nhập kho');
+    }
+
+    /**
+     * Bulk receive orders from other warehouses
+     */
+    public function bulkReceiveOrder(Request $request)
+    {
+        $validated = $request->validate([
+            'order_ids' => 'required|array',
+            'order_ids.*' => 'exists:orders,id',
+        ]);
+
+        $user = auth()->user();
+        $warehouseId = null;
+        
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $warehouseId = $user->warehouse_id;
+        }
+
+        if (!$warehouseId) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Vui lòng chỉ định kho nhận hàng'], 400);
+            }
+            return redirect()->back()->with('error', 'Vui lòng chỉ định kho nhận hàng');
+        }
+
+        $warehouse = Warehouse::find($warehouseId);
+        if (!$warehouse) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Kho nhận không tồn tại'], 400);
+            }
+            return redirect()->back()->with('error', 'Kho nhận không tồn tại');
+        }
+
+        $successCount = 0;
+        $failedCount = 0;
+        $errors = [];
+
+        foreach ($validated['order_ids'] as $orderId) {
+            try {
+                $order = Order::findOrFail($orderId);
+                
+                // Lấy thông tin kho gửi
+                $fromWarehouse = null;
+                if ($order->warehouse_id && $order->status === 'in_transit') {
+                    $fromWarehouse = Warehouse::find($order->warehouse_id);
+                } elseif ($order->warehouse_id) {
+                    // Tìm giao dịch xuất kho gần nhất từ một kho khác
+                    $lastOutTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
+                        ->where('type', 'out')
+                        ->where('warehouse_id', '!=', $warehouseId)
+                        ->orderBy('transaction_date', 'desc')
+                        ->first();
+                    if ($lastOutTransaction) {
+                        $fromWarehouse = Warehouse::find($lastOutTransaction->warehouse_id);
+                    } else {
+                        $fromWarehouse = Warehouse::find($order->warehouse_id);
+                    }
+                }
+
+                // Tạo ghi chú
+                $notes = '';
+                if ($fromWarehouse) {
+                    $notes = "Nhận từ {$fromWarehouse->name}";
+                } else {
+                    $notes = 'Nhận từ kho khác';
+                }
+
+                // Lưu lại tài xế vận chuyển tỉnh (nếu có) trước khi cập nhật
+                $intercityDriverId = $order->delivery_driver_id;
+                
+                $order->update([
+                    'warehouse_id' => $warehouseId,
+                    'status' => 'in_warehouse',
+                    'to_warehouse_id' => null,
+                ]);
+
+                WarehouseTransaction::create([
+                    'warehouse_id' => $warehouseId,
+                    'order_id' => $order->id,
+                    'type' => 'in',
+                    'notes' => $notes,
+                    'transaction_date' => now(),
+                    'created_by' => auth()->id(),
+                ]);
+
+                // Tạo OrderStatus
+                $finalStatusNotes = $fromWarehouse 
+                    ? "Đơn hàng từ kho {$fromWarehouse->name} ({$fromWarehouse->province}) vào kho {$warehouse->name}"
+                    : "Đơn hàng từ kho khác vào kho {$warehouse->name}";
+                
+                if ($intercityDriverId) {
+                    $intercityDriver = \App\Models\Driver::find($intercityDriverId);
+                    if ($intercityDriver) {
+                        $finalStatusNotes .= " - Tài xế vận chuyển: {$intercityDriver->name}";
+                    }
+                }
+                
+                \App\Models\OrderStatus::create([
+                    'order_id' => $order->id,
+                    'status' => 'in_warehouse',
+                    'notes' => $finalStatusNotes . " - Kho đích đã nhận được hàng. Có thể phân công tài xế shipper để giao hàng cho khách hàng.",
+                    'warehouse_id' => $warehouseId,
+                    'driver_id' => $intercityDriverId,
+                    'updated_by' => auth()->id(),
+                ]);
+
+                $successCount++;
+            } catch (\Exception $e) {
+                $failedCount++;
+                $errors[] = "Đơn hàng #{$orderId}: " . $e->getMessage();
+            }
+        }
+
+        $message = "Đã nhận {$successCount} đơn hàng vào kho thành công.";
+        if ($failedCount > 0) {
+            $message .= " {$failedCount} đơn hàng thất bại.";
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $message,
+                'success_count' => $successCount,
+                'failed_count' => $failedCount,
+                'errors' => $errors,
+            ]);
+        }
+        
+        return redirect()->back()->with('success', $message);
     }
 
     /**
@@ -425,14 +683,30 @@ class WarehouseController extends Controller
             return redirect()->back()->with('error', 'Đơn hàng không ở trong kho');
         }
 
-        // Use default warehouse (Nghệ An) if not specified
-        $warehouseId = $validated['warehouse_id'] ?? $order->warehouse_id ?? Warehouse::getDefaultWarehouse()->id ?? null;
+        // Warehouse_id: ưu tiên từ request, nếu không có thì dùng warehouse_id của đơn hàng
+        $warehouseId = $validated['warehouse_id'] ?? $order->warehouse_id;
+        
+        if (!$warehouseId) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Không xác định được kho xuất'], 400);
+            }
+            return redirect()->back()->with('error', 'Không xác định được kho xuất');
+        }
 
-        // Tự động tìm tuyến từ Nghệ An đến tỉnh nhận nếu chưa chọn
+        // Lấy thông tin kho để tạo ghi chú và tìm tuyến
+        $warehouse = Warehouse::find($warehouseId);
+        if (!$warehouse) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Kho không tồn tại'], 400);
+            }
+            return redirect()->back()->with('error', 'Kho không tồn tại');
+        }
+
+        // Tự động tìm tuyến từ tỉnh của kho đến tỉnh nhận nếu chưa chọn
         $routeId = $validated['route_id'] ?? null;
-        if (!$routeId && $order->receiver_province) {
+        if (!$routeId && $warehouse->province && $order->receiver_province) {
             $route = \App\Models\Route::where('is_active', true)
-                ->where('from_province', 'Nghệ An')
+                ->where('from_province', $warehouse->province)
                 ->where('to_province', $order->receiver_province)
                 ->first();
             if ($route) {
@@ -444,28 +718,25 @@ class WarehouseController extends Controller
             $order->update(['route_id' => $routeId]);
         }
 
-        // Xuất cho shipper giao hàng (không set to_warehouse_id)
+        // Tạo ghi chú với tên kho nếu chưa có
+        $notes = $validated['notes'] ?? "Đã chuẩn bị xuất kho từ {$warehouse->name}";
+
+        // Đảm bảo to_warehouse_id = null (xuất cho shipper giao hàng, không điều phối đến kho khác)
         $order->update([
-            'status' => 'out_for_delivery',
-            'to_warehouse_id' => null, // Đảm bảo không có to_warehouse_id
+            'to_warehouse_id' => null,
         ]);
 
-        // Create order status
-        \App\Models\OrderStatus::create([
-            'order_id' => $order->id,
-            'status' => 'out_for_delivery',
-            'notes' => $validated['notes'] ?? 'Đã xuất kho cho shipper giao hàng',
-            'warehouse_id' => $warehouseId,
-            'updated_by' => auth()->id(),
-        ]);
-
+        // Tạo WarehouseTransaction để ghi nhận đã chuẩn bị xuất kho
+        // Đơn hàng vẫn ở trạng thái in_warehouse, chờ phân công tài xế ở trang "Giao hàng"
+        // KHÔNG tạo OrderStatus ở đây vì trạng thái đơn hàng không thay đổi (vẫn là in_warehouse)
+        // OrderStatus sẽ được tạo khi phân công tài xế (chuyển sang out_for_delivery)
         WarehouseTransaction::create([
             'warehouse_id' => $warehouseId,
             'order_id' => $validated['order_id'],
             'type' => 'out',
-            'route_id' => $validated['route_id'] ?? null,
+            'route_id' => $routeId,
             'reference_number' => $validated['reference_number'] ?? null,
-            'notes' => $validated['notes'] ?? null,
+            'notes' => $notes,
             'transaction_date' => now(),
             'created_by' => auth()->id(),
         ]);
@@ -477,7 +748,7 @@ class WarehouseController extends Controller
             ]);
         }
         
-        return redirect()->back()->with('success', 'Đơn hàng đã được xuất kho');
+        return redirect()->route('admin.delivery.index')->with('success', 'Đơn hàng đã được xuất kho. Vui lòng phân công tài xế giao hàng.');
     }
 
     /**
@@ -517,12 +788,9 @@ class WarehouseController extends Controller
             }
         }
 
-        $fromWarehouseId = $validated['warehouse_id'] ?? Warehouse::getDefaultWarehouse()->id ?? null;
-        $toWarehouse = Warehouse::findOrFail($validated['to_warehouse_id']);
-
+        // Lấy danh sách đơn hàng trước
         $orders = Order::whereIn('id', $orderIds)
             ->where('status', 'in_warehouse')
-            ->where('warehouse_id', $fromWarehouseId)
             ->get();
 
         if ($orders->isEmpty()) {
@@ -531,6 +799,58 @@ class WarehouseController extends Controller
             }
             return redirect()->back()->with('error', 'Không có đơn hàng nào hợp lệ để vận chuyển');
         }
+
+        // Warehouse_id nguồn: ưu tiên từ request, nếu không có thì lấy từ đơn hàng đầu tiên
+        // Tất cả đơn hàng phải cùng một kho nguồn
+        $firstOrder = $orders->first();
+        $fromWarehouseId = $validated['warehouse_id'] ?? $firstOrder->warehouse_id;
+
+        if (!$fromWarehouseId) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Không xác định được kho nguồn'], 400);
+            }
+            return redirect()->back()->with('error', 'Không xác định được kho nguồn');
+        }
+
+        // Kiểm tra kho đích
+        $toWarehouse = Warehouse::findOrFail($validated['to_warehouse_id']);
+        if ($fromWarehouseId == $toWarehouse->id) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Kho nguồn và kho đích không được trùng nhau'], 400);
+            }
+            return redirect()->back()->with('error', 'Kho nguồn và kho đích không được trùng nhau');
+        }
+
+        // Lấy thông tin kho nguồn
+        $fromWarehouse = Warehouse::find($fromWarehouseId);
+        if (!$fromWarehouse) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Kho nguồn không tồn tại'], 400);
+            }
+            return redirect()->back()->with('error', 'Kho nguồn không tồn tại');
+        }
+
+        // Kiểm tra tất cả đơn hàng phải cùng một kho nguồn
+        $orders = $orders->filter(function($order) use ($fromWarehouseId) {
+            return $order->warehouse_id == $fromWarehouseId;
+        });
+
+        if ($orders->isEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Tất cả đơn hàng phải cùng một kho nguồn'], 400);
+            }
+            return redirect()->back()->with('error', 'Tất cả đơn hàng phải cùng một kho nguồn');
+        }
+
+        // Tạo ghi chú mặc định
+        $defaultNotes = "Xuất kho từ {$fromWarehouse->name} đi {$toWarehouse->name}";
+        if ($validated['intercity_driver_id'] ?? null) {
+            $driver = \App\Models\Driver::find($validated['intercity_driver_id']);
+            if ($driver) {
+                $defaultNotes .= " - Tài xế: {$driver->name}";
+            }
+        }
+        $notes = $validated['notes'] ?? $defaultNotes;
 
         $successCount = 0;
         $failedCount = 0;
@@ -542,13 +862,6 @@ class WarehouseController extends Controller
                     'status' => 'in_transit',
                     'to_warehouse_id' => $validated['to_warehouse_id'],
                 ]);
-
-                // Tạo order status
-                $notes = $validated['notes'] ?? "Đã xuất kho đi {$toWarehouse->name} ({$toWarehouse->province})";
-                if ($validated['intercity_driver_id'] ?? null) {
-                    $driver = \App\Models\Driver::find($validated['intercity_driver_id']);
-                    $notes .= " - Tài xế: {$driver->name}";
-                }
 
                 \App\Models\OrderStatus::create([
                     'order_id' => $order->id,
@@ -565,7 +878,7 @@ class WarehouseController extends Controller
                     'order_id' => $order->id,
                     'type' => 'out',
                     'reference_number' => $validated['reference_number'] ?? null,
-                    'notes' => "Xuất kho vận chuyển đến {$toWarehouse->name}",
+                    'notes' => $notes,
                     'transaction_date' => now(),
                     'created_by' => auth()->id(),
                 ]);
@@ -611,9 +924,7 @@ class WarehouseController extends Controller
             return redirect()->back()->with('error', 'Vui lòng chọn ít nhất một đơn hàng');
         }
 
-        // Use default warehouse (Nghệ An) if not specified
-        $warehouseId = $validated['warehouse_id'] ?? Warehouse::getDefaultWarehouse()->id ?? null;
-
+        // Lấy danh sách đơn hàng trước
         $orders = Order::whereIn('id', $orderIds)
             ->where('status', 'in_warehouse')
             ->get();
@@ -625,17 +936,54 @@ class WarehouseController extends Controller
             return redirect()->back()->with('error', 'Không có đơn hàng nào hợp lệ để xuất kho');
         }
 
+        // Warehouse_id: ưu tiên từ request, nếu không có thì lấy từ đơn hàng đầu tiên
+        // Tất cả đơn hàng phải cùng một kho
+        $firstOrder = $orders->first();
+        $warehouseId = $validated['warehouse_id'] ?? $firstOrder->warehouse_id;
+        
+        if (!$warehouseId) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Không xác định được kho xuất'], 400);
+            }
+            return redirect()->back()->with('error', 'Không xác định được kho xuất');
+        }
+
+        // Lấy thông tin kho
+        $warehouse = Warehouse::find($warehouseId);
+        if (!$warehouse) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Kho không tồn tại'], 400);
+            }
+            return redirect()->back()->with('error', 'Kho không tồn tại');
+        }
+
+        // Kiểm tra tất cả đơn hàng phải cùng một kho
+        $differentWarehouseOrders = $orders->filter(function($order) use ($warehouseId) {
+            return $order->warehouse_id != $warehouseId;
+        });
+
+        if ($differentWarehouseOrders->isNotEmpty()) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Các đơn hàng phải cùng một kho'], 400);
+            }
+            return redirect()->back()->with('error', 'Các đơn hàng phải cùng một kho');
+        }
+
+        // Tạo ghi chú với tên kho nếu chưa có notes từ request
+        $defaultNotes = "Xuất kho hàng loạt từ {$warehouse->name}";
+        $notes = $validated['notes'] ?? $defaultNotes;
+
         $successCount = 0;
         $failedCount = 0;
         $globalRouteId = $validated['route_id'] ?? null; // Tuyến chung nếu chọn
 
         foreach ($orders as $order) {
             try {
-                // Ưu tiên tuyến chung, nếu không có thì tự động tìm tuyến từ Nghệ An đến tỉnh nhận
+                // Tìm tuyến: ưu tiên tuyến chung, nếu không có thì tự động tìm từ tỉnh kho đến tỉnh nhận
                 $routeId = $globalRouteId;
-                if (!$routeId && $order->receiver_province) {
+                if (!$routeId && $warehouse->province && $order->receiver_province) {
                     $route = \App\Models\Route::where('is_active', true)
-                        ->where('from_province', 'Nghệ An')
+                        ->where('from_province', $warehouse->province)
                         ->where('to_province', $order->receiver_province)
                         ->first();
                     if ($route) {
@@ -647,28 +995,22 @@ class WarehouseController extends Controller
                     $order->update(['route_id' => $routeId]);
                 }
 
-                // Xuất cho shipper giao hàng (không set to_warehouse_id)
+                // Đảm bảo to_warehouse_id = null (xuất cho shipper giao hàng, không điều phối đến kho khác)
                 $order->update([
-                    'status' => 'out_for_delivery',
-                    'to_warehouse_id' => null, // Đảm bảo không có to_warehouse_id
+                    'to_warehouse_id' => null,
                 ]);
 
-                // Create order status
-                \App\Models\OrderStatus::create([
-                    'order_id' => $order->id,
-                    'status' => 'out_for_delivery',
-                    'notes' => $validated['notes'] ?? 'Đã xuất kho cho shipper giao hàng',
-                    'warehouse_id' => $warehouseId,
-                    'updated_by' => auth()->id(),
-                ]);
-
+                // Tạo WarehouseTransaction để ghi nhận đã chuẩn bị xuất kho
+                // Đơn hàng vẫn ở trạng thái in_warehouse, chờ phân công tài xế ở trang "Giao hàng"
+                // KHÔNG tạo OrderStatus ở đây vì trạng thái đơn hàng không thay đổi (vẫn là in_warehouse)
+                // OrderStatus sẽ được tạo khi phân công tài xế (chuyển sang out_for_delivery)
                 WarehouseTransaction::create([
                     'warehouse_id' => $warehouseId,
                     'order_id' => $order->id,
                     'type' => 'out',
-                    'route_id' => $routeId ?? null,
+                    'route_id' => $routeId,
                     'reference_number' => $validated['reference_number'] ?? null,
-                    'notes' => $validated['notes'] ?? 'Xuất kho hàng loạt',
+                    'notes' => $notes,
                     'transaction_date' => now(),
                     'created_by' => auth()->id(),
                 ]);
@@ -686,7 +1028,7 @@ class WarehouseController extends Controller
             ]);
         }
         
-        return redirect()->back()->with('success', "Đã xuất kho {$successCount} đơn hàng" . ($failedCount > 0 ? ", {$failedCount} đơn thất bại" : ''));
+        return redirect()->route('admin.delivery.index')->with('success', "Đã xuất kho {$successCount} đơn hàng" . ($failedCount > 0 ? ", {$failedCount} đơn thất bại" : '') . ". Vui lòng phân công tài xế giao hàng.");
     }
 
     /**

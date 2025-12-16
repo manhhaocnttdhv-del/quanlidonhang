@@ -10,14 +10,38 @@ class DashboardController extends Controller
 {
     public function index()
     {
+        $user = auth()->user();
+        
+        // Xây dựng query cơ bản
+        $ordersQuery = Order::query();
+        $recentOrdersQuery = Order::query();
+        
+        // Nếu là warehouse admin, chỉ xem đơn hàng liên quan đến kho của mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $ordersQuery->where(function($query) use ($user) {
+                $query->where('warehouse_id', $user->warehouse_id)
+                      ->orWhere('to_warehouse_id', $user->warehouse_id)
+                      ->orWhere(function($q) use ($user) {
+                          // Đơn hàng đã giao trong khu vực kho này
+                          $q->where('status', 'delivered')
+                            ->where('receiver_province', $user->warehouse->province ?? '');
+                      });
+            });
+            
+            $recentOrdersQuery->where(function($query) use ($user) {
+                $query->where('warehouse_id', $user->warehouse_id)
+                      ->orWhere('to_warehouse_id', $user->warehouse_id);
+            });
+        }
+        
         $stats = [
-            'total_orders' => Order::count(),
-            'delivered' => Order::where('status', 'delivered')->count(),
-            'processing' => Order::whereIn('status', ['pending', 'pickup_pending', 'picking_up', 'in_transit', 'out_for_delivery'])->count(),
-            'revenue' => Order::whereDate('created_at', today())->sum('shipping_fee'),
+            'total_orders' => (clone $ordersQuery)->count(),
+            'delivered' => (clone $ordersQuery)->where('status', 'delivered')->count(),
+            'processing' => (clone $ordersQuery)->whereIn('status', ['pending', 'pickup_pending', 'picking_up', 'in_transit', 'out_for_delivery'])->count(),
+            'revenue' => (clone $ordersQuery)->whereDate('created_at', today())->sum('shipping_fee'),
         ];
         
-        $recentOrders = Order::orderBy('created_at', 'desc')->limit(10)->get();
+        $recentOrders = $recentOrdersQuery->orderBy('created_at', 'desc')->limit(10)->get();
         
         return view('admin.dashboard', compact('stats', 'recentOrders'));
     }

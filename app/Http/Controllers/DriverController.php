@@ -114,6 +114,7 @@ class DriverController extends Controller
     {
         $driver = Driver::findOrFail($id);
 
+        $user = auth()->user();
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'phone' => 'sometimes|string|max:20',
@@ -127,6 +128,11 @@ class DriverController extends Controller
             'is_active' => 'sometimes|boolean',
             'notes' => 'nullable|string',
         ]);
+
+        // Nếu là warehouse admin, không cho phép đổi warehouse_id
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $validated['warehouse_id'] = $user->warehouse_id;
+        }
 
         $driver->update($validated);
 

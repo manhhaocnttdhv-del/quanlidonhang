@@ -4,69 +4,70 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use App\Models\Customer;
+use App\Models\Warehouse;
 use Illuminate\Support\Str;
 
 class CustomerSeeder extends Seeder
 {
     public function run(): void
     {
-        $customers = [
-            [
-                'code' => 'KH' . strtoupper(Str::random(8)),
-                'name' => 'Công ty TNHH ABC',
-                'phone' => '0901111111',
-                'email' => 'abc@example.com',
-                'address' => '123 Đường ABC, Phường 1',
-                'province' => 'Hồ Chí Minh',
-                'district' => 'Quận 1',
-                'ward' => 'Phường Bến Nghé',
-                'tax_code' => '0123456789',
-                'is_active' => true,
-            ],
-            [
-                'code' => 'KH' . strtoupper(Str::random(8)),
-                'name' => 'Cửa hàng XYZ',
-                'phone' => '0902222222',
-                'email' => 'xyz@example.com',
-                'address' => '456 Đường XYZ, Phường 2',
-                'province' => 'Hà Nội',
-                'district' => 'Quận Hoàn Kiếm',
-                'ward' => 'Phường Hàng Bông',
-                'is_active' => true,
-            ],
-            [
-                'code' => 'KH' . strtoupper(Str::random(8)),
-                'name' => 'Shop Online DEF',
-                'phone' => '0903333333',
-                'email' => 'def@example.com',
-                'address' => '789 Đường DEF',
-                'province' => 'Đà Nẵng',
-                'district' => 'Quận Hải Châu',
-                'is_active' => true,
-            ],
-            [
-                'code' => 'KH' . strtoupper(Str::random(8)),
-                'name' => 'Nguyễn Văn A',
-                'phone' => '0904444444',
-                'email' => 'nguyenvana@example.com',
-                'address' => '321 Đường GHI',
-                'province' => 'Hồ Chí Minh',
-                'district' => 'Quận 3',
-                'is_active' => true,
-            ],
-            [
-                'code' => 'KH' . strtoupper(Str::random(8)),
-                'name' => 'Trần Thị B',
-                'phone' => '0905555555',
-                'address' => '654 Đường JKL',
-                'province' => 'Hà Nội',
-                'district' => 'Quận Cầu Giấy',
-                'is_active' => true,
-            ],
-        ];
+        $warehouses = Warehouse::all();
+        $ngheAnWarehouse = $warehouses->where('province', 'Nghệ An')->first();
+        $haNoiWarehouse = $warehouses->where('province', 'Hà Nội')->first();
+        $hcmWarehouse = $warehouses->where('province', 'Hồ Chí Minh')->first();
+        $daNangWarehouse = $warehouses->where('province', 'Đà Nẵng')->first();
 
-        foreach ($customers as $customer) {
-            Customer::create($customer);
+        // Tạo 30 khách hàng, phân bổ đều cho các kho
+        $customerNames = [
+            'Công ty TNHH', 'Cửa hàng', 'Shop Online', 'Doanh nghiệp', 'Công ty CP',
+            'Thương mại', 'Dịch vụ', 'Xuất nhập khẩu', 'Sản xuất', 'Thương mại điện tử'
+        ];
+        
+        $firstNames = ['Nguyễn Văn', 'Trần Thị', 'Lê Văn', 'Phạm Thị', 'Hoàng Văn', 
+                       'Vũ Thị', 'Đặng Văn', 'Bùi Thị', 'Đỗ Văn', 'Hồ Thị'];
+        $lastNames = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+
+        $totalCustomers = 30;
+        $customersPerWarehouse = ceil($totalCustomers / $warehouses->count());
+
+        for ($i = 1; $i <= $totalCustomers; $i++) {
+            // Phân bổ đều giữa các kho
+            $warehouseIndex = floor(($i - 1) / $customersPerWarehouse) % $warehouses->count();
+            $warehouse = $warehouses->values()[$warehouseIndex];
+            
+            // Xác định tỉnh và địa chỉ dựa trên kho
+            $province = $warehouse->province;
+            $district = $warehouse->district ?? 'Quận ' . rand(1, 12);
+            $ward = $warehouse->ward ?? 'Phường ' . rand(1, 20);
+            
+            // Tạo tên khách hàng
+            if (rand(0, 100) <= 60) {
+                // 60% là công ty/cửa hàng
+                $name = $customerNames[array_rand($customerNames)] . ' ' . strtoupper(Str::random(3));
+            } else {
+                // 40% là cá nhân
+                $name = $firstNames[array_rand($firstNames)] . ' ' . $lastNames[array_rand($lastNames)];
+            }
+            
+            // Tạo số điện thoại
+            $phone = '09' . rand(10000000, 99999999);
+            
+            // Tạo email
+            $email = strtolower(Str::slug($name)) . rand(1, 999) . '@example.com';
+            
+            Customer::create([
+                'code' => 'KH' . strtoupper(Str::random(8)),
+                'name' => $name,
+                'phone' => $phone,
+                'email' => $email,
+                'address' => rand(1, 999) . ' Đường ' . strtoupper(Str::random(5)) . ', ' . $ward,
+                'province' => $province,
+                'district' => $district,
+                'ward' => $ward,
+                'tax_code' => rand(0, 100) > 70 ? str_pad(rand(100000000, 999999999), 10, '0', STR_PAD_LEFT) : null,
+                'warehouse_id' => $warehouse->id,
+                'is_active' => rand(0, 100) > 10, // 90% active
+            ]);
         }
     }
 }

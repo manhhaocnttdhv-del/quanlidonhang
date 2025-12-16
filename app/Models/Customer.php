@@ -23,6 +23,7 @@ class Customer extends Model
         'notes',
         'is_active',
         'user_id',
+        'warehouse_id',
     ];
 
     protected $casts = [
@@ -47,5 +48,10 @@ class Customer extends Model
     public function codReconciliations()
     {
         return $this->hasMany(CodReconciliation::class);
+    }
+
+    public function warehouse()
+    {
+        return $this->belongsTo(Warehouse::class);
     }
 }

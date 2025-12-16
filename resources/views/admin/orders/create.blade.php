@@ -57,11 +57,11 @@
                     </div>
                     <div class="row">
                         <div class="col-md-12">
-                            <label class="form-label">Tỉnh/Thành</label>
-                            <input type="text" name="sender_province" id="sender_province" class="form-control" value="Nghệ An" readonly>
-                            <small class="text-muted">Mặc định: Nghệ An (không cần chọn huyện/xã)</small>
-                            <input type="hidden" name="sender_district" id="sender_district" value="">
-                            <input type="hidden" name="sender_ward" id="sender_ward" value="">
+                            <label class="form-label">Kho gửi</label>
+                            <input type="text" class="form-control" value="{{ ($warehouse->name ?? 'Kho Nghệ An') . ' - ' . ($warehouse->address ?? '') . ' (' . ($warehouse->province ?? 'Nghệ An') . ')' }}" readonly>
+                            <input type="hidden" name="sender_province" id="sender_province" value="{{ $warehouse->province ?? 'Nghệ An' }}">
+                            <input type="hidden" name="sender_district" id="sender_district" value="{{ $warehouse->district ?? '' }}">
+                            <input type="hidden" name="sender_ward" id="sender_ward" value="{{ $warehouse->ward ?? '' }}">
                         </div>
                     </div>
                     <div class="mb-3">
@@ -117,6 +117,13 @@
                         <label class="form-label">Địa chỉ chi tiết <span class="text-danger">*</span></label>
                         <textarea name="receiver_address" id="receiver_address" class="form-control" rows="2" required placeholder="Nhập địa chỉ chi tiết sau khi chọn Tỉnh/Huyện/Xã" disabled>{{ old('receiver_address') }}</textarea>
                         <small class="text-muted">Vui lòng chọn đầy đủ Tỉnh/Huyện/Xã trước khi nhập địa chỉ</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Kho vận chuyển đến <span class="text-danger">*</span></label>
+                        <select name="to_warehouse_id" id="to_warehouse_id" class="form-select" required>
+                            <option value="">-- Chọn Tỉnh/Thành trước --</option>
+                        </select>
+                        <small class="text-muted">Vui lòng chọn Tỉnh/Thành để hiển thị danh sách kho</small>
                     </div>
                 </div>
             </div>
@@ -226,25 +233,17 @@
                         <label class="form-label">Địa chỉ</label>
                         <textarea name="address" class="form-control" rows="2"></textarea>
                     </div>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <label class="form-label">Tỉnh/Thành</label>
-                            <select name="province" id="modal_province" class="form-select address-select">
-                                <option value="">-- Chọn Tỉnh/Thành --</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Quận/Huyện</label>
-                            <select name="district" id="modal_district" class="form-select address-select" disabled>
-                                <option value="">-- Chọn Quận/Huyện --</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Phường/Xã</label>
-                            <select name="ward" id="modal_ward" class="form-select address-select" disabled>
-                                <option value="">-- Chọn Phường/Xã --</option>
-                            </select>
-                        </div>
+                    @php
+                        $userWarehouse = auth()->user()->warehouse ?? null;
+                        $defaultProvince = $userWarehouse->province ?? 'Nghệ An';
+                        $defaultDistrict = $userWarehouse->district ?? '';
+                        $defaultWard = $userWarehouse->ward ?? '';
+                    @endphp
+                    <input type="hidden" name="province" id="modal_province" value="{{ $defaultProvince }}">
+                    <input type="hidden" name="district" id="modal_district" value="{{ $defaultDistrict }}">
+                    <input type="hidden" name="ward" id="modal_ward" value="{{ $defaultWard }}">
+                    <div class="alert alert-info mb-0">
+                        <small><i class="fas fa-info-circle me-1"></i>Tỉnh/Thành: <strong>{{ $defaultProvince }}</strong> (tự động theo kho của bạn)</small>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -310,16 +309,21 @@ $(document).ready(function() {
         const $districtSelect = $('#receiver_district');
         const $wardSelect = $('#receiver_ward');
         const $addressInput = $('#receiver_address');
+        const $warehouseSelect = $('#to_warehouse_id');
         
-        // Reset and disable district, ward, and address
+        // Reset and disable district, ward, address, and warehouse
         $districtSelect.prop('disabled', true).html('<option value="">-- Chọn Quận/Huyện --</option>');
         $wardSelect.prop('disabled', true).html('<option value="">-- Chọn Phường/Xã --</option>');
         $addressInput.prop('disabled', true).val('').attr('placeholder', 'Nhập địa chỉ chi tiết sau khi chọn Tỉnh/Huyện/Xã');
+        $warehouseSelect.prop('disabled', true).html('<option value="">-- Chọn Tỉnh/Thành trước --</option>');
         
         if (!provinceName || !vietnamAddresses) {
             calculateShippingFee();
             return;
         }
+        
+        // Load warehouses for this province
+        loadWarehousesForProvince(provinceName);
         
         loadDistrictsForProvince(provinceName, '#receiver_district');
         
@@ -328,6 +332,54 @@ $(document).ready(function() {
             calculateShippingFee();
         }, 100);
     });
+    
+    // Load warehouses for a province
+    function loadWarehousesForProvince(provinceName) {
+        const $warehouseSelect = $('#to_warehouse_id');
+        
+        if (!provinceName) {
+            $warehouseSelect.prop('disabled', true).html('<option value="">-- Chọn Tỉnh/Thành trước --</option>');
+            $warehouseSelect.removeAttr('required'); // Bỏ required khi chưa chọn tỉnh
+            return;
+        }
+        
+        // Show loading
+        $warehouseSelect.prop('disabled', true).html('<option value="">Đang tải kho...</option>');
+        $warehouseSelect.attr('required', 'required'); // Thêm required khi đã chọn tỉnh
+        
+        console.log('Đang tải kho cho tỉnh:', provinceName);
+        
+        $.ajax({
+            url: '/admin/api/warehouses',
+            method: 'GET',
+            data: { province: provinceName },
+            success: function(warehouses) {
+                console.log('Kết quả tìm kho:', warehouses);
+                $warehouseSelect.html('<option value="">-- Chọn kho vận chuyển đến --</option>');
+                
+                if (warehouses.length === 0) {
+                    $warehouseSelect.append('<option value="">Không có kho nào ở tỉnh này</option>');
+                    $warehouseSelect.prop('disabled', true);
+                    $warehouseSelect.removeAttr('required'); // Bỏ required nếu không có kho
+                    console.warn('Không tìm thấy kho nào cho tỉnh:', provinceName);
+                } else {
+                    warehouses.forEach(function(warehouse) {
+                        $warehouseSelect.append(`<option value="${warehouse.id}">${warehouse.code} - ${warehouse.name} (${warehouse.address})</option>`);
+                    });
+                    $warehouseSelect.prop('disabled', false);
+                    $warehouseSelect.attr('required', 'required'); // Giữ required khi có kho
+                    console.log('Đã load', warehouses.length, 'kho');
+                }
+            },
+            error: function(xhr) {
+                console.error('Lỗi khi tải danh sách kho:', xhr);
+                console.error('Response:', xhr.responseText);
+                $warehouseSelect.html('<option value="">Lỗi khi tải danh sách kho</option>');
+                $warehouseSelect.prop('disabled', true);
+                $warehouseSelect.removeAttr('required'); // Bỏ required khi lỗi
+            }
+        });
+    }
     
     // Handle receiver district change
     $(document).on('change', '#receiver_district', function() {

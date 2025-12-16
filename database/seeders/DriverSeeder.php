@@ -11,73 +11,71 @@ class DriverSeeder extends Seeder
 {
     public function run(): void
     {
-        // Lấy kho Nghệ An (kho mặc định)
-        $ngheAnWarehouse = Warehouse::where('province', 'Nghệ An')
-            ->orWhere('name', 'LIKE', '%Nghệ An%')
-            ->orWhere('code', 'LIKE', '%NA%')
-            ->first();
+        $warehouses = Warehouse::all();
+        $ngheAnWarehouse = $warehouses->where('province', 'Nghệ An')->first() ?? $warehouses->first();
+        $haNoiWarehouse = $warehouses->where('province', 'Hà Nội')->first();
+        $hcmWarehouse = $warehouses->where('province', 'Hồ Chí Minh')->first();
+        $daNangWarehouse = $warehouses->where('province', 'Đà Nẵng')->first();
         
-        if (!$ngheAnWarehouse) {
-            $ngheAnWarehouse = Warehouse::first();
-        }
+        $firstNames = ['Nguyễn Văn', 'Trần Văn', 'Lê Văn', 'Phạm Văn', 'Hoàng Văn', 
+                       'Vũ Văn', 'Đặng Văn', 'Bùi Văn', 'Đỗ Văn', 'Hồ Văn'];
+        $lastNames = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
         
-        $drivers = [
-            [
-                'code' => 'TX-NA-001',
-                'name' => 'Nguyễn Văn Tài Xế 1',
-                'phone' => '0911111111',
-                'email' => 'taixe1@smartpost.com',
-                'license_number' => 'NA-123456',
-                'vehicle_type' => 'Xe tải nhỏ',
-                'vehicle_number' => '37A-12345',
-                'area' => 'Thành phố Vinh, Nghệ An',
-                'warehouse_id' => $ngheAnWarehouse->id,
-                'driver_type' => 'shipper',
-                'is_active' => true,
-            ],
-            [
-                'code' => 'TX-NA-002',
-                'name' => 'Trần Văn Tài Xế 2',
-                'phone' => '0912222222',
-                'email' => 'taixe2@smartpost.com',
-                'license_number' => 'NA-234567',
-                'vehicle_type' => 'Xe máy',
-                'vehicle_number' => '37B-23456',
-                'area' => 'Thành phố Vinh, Nghệ An',
-                'warehouse_id' => $ngheAnWarehouse->id,
-                'driver_type' => 'shipper',
-                'is_active' => true,
-            ],
-            [
-                'code' => 'TX-NA-003',
-                'name' => 'Lê Văn Tài Xế 3',
-                'phone' => '0913333333',
-                'email' => 'taixe3@smartpost.com',
-                'license_number' => 'NA-345678',
+        $vehicleTypes = ['Xe máy', 'Xe tải nhỏ', 'Xe tải lớn', 'Xe ba gác'];
+        
+        // Tạo tài xế cho mỗi kho
+        foreach ($warehouses as $warehouse) {
+            $provinceCode = '';
+            if ($warehouse->province === 'Nghệ An') {
+                $provinceCode = 'NA';
+            } elseif ($warehouse->province === 'Hà Nội') {
+                $provinceCode = 'HN';
+            } elseif ($warehouse->province === 'Hồ Chí Minh') {
+                $provinceCode = 'HCM';
+            } elseif ($warehouse->province === 'Đà Nẵng') {
+                $provinceCode = 'DN';
+            } else {
+                $provinceCode = strtoupper(substr($warehouse->province, 0, 2));
+            }
+            
+            // Mỗi kho có 3 shipper và 1 intercity driver
+            for ($i = 1; $i <= 3; $i++) {
+                $name = $firstNames[array_rand($firstNames)] . ' ' . $lastNames[array_rand($lastNames)] . ' ' . $i;
+                $phone = '09' . rand(10000000, 99999999);
+                $vehicleType = $vehicleTypes[array_rand($vehicleTypes)];
+                
+                Driver::create([
+                    'code' => 'TX-' . $provinceCode . '-' . str_pad($i, 3, '0', STR_PAD_LEFT),
+                    'name' => $name,
+                    'phone' => $phone,
+                    'email' => strtolower(Str::slug($name)) . rand(1, 999) . '@smartpost.com',
+                    'license_number' => $provinceCode . '-' . rand(100000, 999999),
+                    'vehicle_type' => $vehicleType,
+                    'vehicle_number' => rand(10, 99) . chr(65 + rand(0, 25)) . '-' . rand(10000, 99999),
+                    'area' => $warehouse->district . ', ' . $warehouse->province,
+                    'warehouse_id' => $warehouse->id,
+                    'driver_type' => 'shipper',
+                    'is_active' => rand(0, 100) > 10, // 90% active
+                ]);
+            }
+            
+            // 1 intercity driver cho mỗi kho
+            $name = $firstNames[array_rand($firstNames)] . ' ' . $lastNames[array_rand($lastNames)] . ' (VT)';
+            $phone = '09' . rand(10000000, 99999999);
+            
+            Driver::create([
+                'code' => 'TX-' . $provinceCode . '-VT-001',
+                'name' => $name,
+                'phone' => $phone,
+                'email' => strtolower(Str::slug($name)) . rand(1, 999) . '@smartpost.com',
+                'license_number' => $provinceCode . '-VT-' . rand(100000, 999999),
                 'vehicle_type' => 'Xe tải lớn',
-                'vehicle_number' => '37C-34567',
+                'vehicle_number' => rand(10, 99) . chr(65 + rand(0, 25)) . '-' . rand(10000, 99999),
                 'area' => 'Vận chuyển các tỉnh',
-                'warehouse_id' => $ngheAnWarehouse->id,
+                'warehouse_id' => $warehouse->id,
                 'driver_type' => 'intercity_driver',
                 'is_active' => true,
-            ],
-            [
-                'code' => 'TX-NA-004',
-                'name' => 'Phạm Văn Tài Xế 4',
-                'phone' => '0914444444',
-                'email' => 'taixe4@smartpost.com',
-                'license_number' => 'NA-456789',
-                'vehicle_type' => 'Xe máy',
-                'vehicle_number' => '37D-45678',
-                'area' => 'Thành phố Vinh, Nghệ An',
-                'warehouse_id' => $ngheAnWarehouse->id,
-                'driver_type' => 'shipper',
-                'is_active' => true,
-            ],
-        ];
-
-        foreach ($drivers as $driver) {
-            Driver::create($driver);
+            ]);
         }
     }
 }

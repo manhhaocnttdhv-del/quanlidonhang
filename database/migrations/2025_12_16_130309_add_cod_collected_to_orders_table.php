@@ -11,10 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('provinces', function (Blueprint $table) {
-            $table->string('province_code', 10)->primary();
-            $table->string('name');
-            $table->timestamps();
+        Schema::table('orders', function (Blueprint $table) {
+            $table->decimal('cod_collected', 15, 2)->nullable()->after('cod_amount')->comment('Số tiền COD đã thu thực tế');
         });
     }
 
@@ -23,6 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('provinces');
+        Schema::table('orders', function (Blueprint $table) {
+            $table->dropColumn('cod_collected');
+        });
     }
 };

@@ -130,9 +130,15 @@
                             <small class="text-muted">{{ $order->sender_province }}</small>
                         </td>
                         <td>
-                            <span class="badge bg-{{ $order->status === 'picking_up' ? 'info' : 'warning' }}">
-                                {{ $order->status === 'picking_up' ? 'Đang lấy hàng' : 'Đã phân công' }}
-                            </span>
+                            @if($order->status === 'picking_up')
+                                <span class="badge bg-info">Đang lấy hàng</span>
+                            @elseif($order->status === 'picked_up')
+                                <span class="badge bg-warning">Đã lấy hàng</span>
+                            @elseif($order->status === 'in_warehouse')
+                                <span class="badge bg-success">Đã về kho</span>
+                            @else
+                                <span class="badge bg-warning">Đã phân công</span>
+                            @endif
                         </td>
                         <td>
                             @if($order->pickup_scheduled_at)
@@ -152,6 +158,11 @@
                                 <button type="button" class="btn btn-sm btn-success" onclick="updatePickupStatus({{ $order->id }}, 'picked_up')" title="Tài xế đã lấy hàng và đưa về kho">
                                     <i class="fas fa-check"></i> Đã lấy
                                 </button>
+                                @endif
+                                @if($order->status === 'in_warehouse')
+                                <span class="badge bg-success">
+                                    <i class="fas fa-warehouse me-1"></i>Đã về kho
+                                </span>
                                 @endif
                                 <a href="{{ route('admin.orders.show', $order->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết">
                                     <i class="fas fa-eye"></i>

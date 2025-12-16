@@ -13,7 +13,13 @@ class CustomerController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Customer::with('user');
+        $user = auth()->user();
+        $query = Customer::with(['user', 'warehouse']);
+
+        // Warehouse admin chỉ xem khách hàng của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $query->where('warehouse_id', $user->warehouse_id);
+        }
 
         if ($request->has('search')) {
             $search = $request->search;
@@ -53,6 +59,7 @@ class CustomerController extends Controller
      */
     public function store(Request $request)
     {
+        $user = auth()->user();
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'phone' => 'nullable|string|max:20',
@@ -63,9 +70,21 @@ class CustomerController extends Controller
             'ward' => 'nullable|string|max:255',
             'tax_code' => 'nullable|string|max:50',
             'notes' => 'nullable|string',
+            'warehouse_id' => 'nullable|exists:warehouses,id',
         ]);
 
         $code = $this->generateCustomerCode();
+
+        // Nếu là warehouse admin, tự động gán warehouse_id và province
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $validated['warehouse_id'] = $user->warehouse_id;
+            // Tự động set province từ warehouse nếu chưa có
+            if (empty($validated['province']) && $user->warehouse) {
+                $validated['province'] = $user->warehouse->province;
+                $validated['district'] = $validated['district'] ?? $user->warehouse->district;
+                $validated['ward'] = $validated['ward'] ?? $user->warehouse->ward;
+            }
+        }
 
         $customer = Customer::create([
             ...$validated,
@@ -103,6 +122,7 @@ class CustomerController extends Controller
     {
         $customer = Customer::findOrFail($id);
 
+        $user = auth()->user();
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'phone' => 'nullable|string|max:20',
@@ -114,7 +134,13 @@ class CustomerController extends Controller
             'tax_code' => 'nullable|string|max:50',
             'is_active' => 'sometimes|boolean',
             'notes' => 'nullable|string',
+            'warehouse_id' => 'nullable|exists:warehouses,id',
         ]);
+
+        // Nếu là warehouse admin, không cho phép đổi warehouse_id
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $validated['warehouse_id'] = $user->warehouse_id;
+        }
 
         $customer->update($validated);
 

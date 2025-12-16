@@ -31,6 +31,35 @@
                 
                 <hr>
                 
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <h6 class="text-muted mb-2">Kho gửi</h6>
+                        @if($order->warehouse)
+                        <p>
+                            <strong>{{ $order->warehouse->name }}</strong><br>
+                            <small class="text-muted">{{ $order->warehouse->address }}<br>
+                            {{ $order->warehouse->province }}</small>
+                        </p>
+                        @else
+                        <p class="text-muted">Chưa xác định</p>
+                        @endif
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-muted mb-2">Kho đến</h6>
+                        @if($order->toWarehouse)
+                        <p>
+                            <strong>{{ $order->toWarehouse->name }}</strong><br>
+                            <small class="text-muted">{{ $order->toWarehouse->address }}<br>
+                            {{ $order->toWarehouse->province }}</small>
+                        </p>
+                        @else
+                        <p class="text-muted">Chưa xác định</p>
+                        @endif
+                    </div>
+                </div>
+                
+                <hr>
+                
                 <div class="row">
                     <div class="col-md-6">
                         <p><strong>Trọng lượng:</strong> {{ $order->weight }} kg</p>
