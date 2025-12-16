@@ -19,7 +19,7 @@ class DatabaseSeeder extends Seeder
             DriverSeeder::class,
             RouteSeeder::class,
             ShippingFeeSeeder::class,
-            OrderSeeder::class,
+            // OrderSeeder::class,
         ]);
     }
 }
