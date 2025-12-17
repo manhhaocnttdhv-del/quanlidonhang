@@ -34,7 +34,9 @@ class CustomerController extends Controller
             $query->where('is_active', $request->is_active);
         }
 
-        $customers = $query->orderBy('created_at', 'desc')->paginate(20);
+        $customers = $query->withCount('orders')
+            ->orderBy('created_at', 'desc')
+            ->paginate(20);
 
         if ($request->expectsJson()) {
             return response()->json($customers);
@@ -50,8 +52,28 @@ class CustomerController extends Controller
     
     public function edit($id)
     {
-        $customer = Customer::findOrFail($id);
-        return view('admin.customers.edit', compact('customer'));
+        $customer = Customer::with('warehouse')->findOrFail($id);
+        
+        $user = auth()->user();
+        
+        // Warehouse admin chỉ sửa được khách hàng của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            if ($customer->warehouse_id != $user->warehouse_id) {
+                return redirect()->route('admin.customers.index')->with('error', 'Bạn không có quyền sửa khách hàng này');
+            }
+        }
+        
+        // Super admin và admin xem tất cả kho, warehouse admin chỉ xem kho của mình
+        $warehouses = collect();
+        if ($user->canManageWarehouses()) {
+            $warehouses = \App\Models\Warehouse::where('is_active', true)->orderBy('name')->get();
+        } else {
+            $warehouses = \App\Models\Warehouse::where('id', $user->warehouse_id)
+                ->where('is_active', true)
+                ->get();
+        }
+        
+        return view('admin.customers.edit', compact('customer', 'warehouses'));
     }
 
     /**
@@ -124,7 +146,7 @@ class CustomerController extends Controller
 
         $user = auth()->user();
         $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
+            'name' => 'required|string|max:255',
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email|max:255',
             'address' => 'nullable|string',
@@ -152,6 +174,48 @@ class CustomerController extends Controller
         }
 
         return redirect()->route('admin.customers.index')->with('success', 'Khách hàng đã được cập nhật');
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(string $id)
+    {
+        $customer = Customer::findOrFail($id);
+        
+        $user = auth()->user();
+        
+        // Warehouse admin chỉ xóa được khách hàng của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            if ($customer->warehouse_id != $user->warehouse_id) {
+                if (request()->expectsJson()) {
+                    return response()->json([
+                        'message' => 'Bạn không có quyền xóa khách hàng này',
+                    ], 403);
+                }
+                return redirect()->back()->with('error', 'Bạn không có quyền xóa khách hàng này');
+            }
+        }
+        
+        // Kiểm tra xem khách hàng có đơn hàng không
+        if ($customer->orders()->count() > 0) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Không thể xóa khách hàng vì đã có đơn hàng liên quan',
+                ], 400);
+            }
+            return redirect()->back()->with('error', 'Không thể xóa khách hàng vì đã có đơn hàng liên quan');
+        }
+        
+        $customer->delete();
+        
+        if (request()->expectsJson()) {
+            return response()->json([
+                'message' => 'Khách hàng đã được xóa thành công',
+            ]);
+        }
+        
+        return redirect()->route('admin.customers.index')->with('success', 'Khách hàng đã được xóa thành công');
     }
 
     /**

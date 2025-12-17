@@ -63,23 +63,7 @@
                         @error('role')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="mb-3" id="warehouse_field" style="display: none;">
-                        <label class="form-label">Kho <span class="text-danger">*</span></label>
-                        <select name="warehouse_id" class="form-select @error('warehouse_id') is-invalid @enderror">
-                            <option value="">Chọn kho</option>
-                            @foreach($warehouses ?? [] as $warehouse)
-                                <option value="{{ $warehouse->id }}" {{ old('warehouse_id') == $warehouse->id ? 'selected' : '' }}>
-                                    {{ $warehouse->name }} ({{ $warehouse->province ?? 'N/A' }})
-                                </option>
-                            @endforeach
-                        </select>
-                        @error('warehouse_id')
-                            <div class="invalid-feedback">{{ $message }}</div>
-                        @enderror
-                        <small class="text-muted">Bắt buộc chọn kho cho Admin Kho</small>
+                        <small class="text-muted">Lưu ý: Để gán kho cho Admin Kho, vui lòng tạo kho và chọn admin kho trong form tạo kho.</small>
                     </div>
                 </div>
             </div>
@@ -105,23 +89,5 @@
     </div>
 </div>
 
-<script>
-document.getElementById('role').addEventListener('change', function() {
-    const warehouseField = document.getElementById('warehouse_field');
-    if (this.value === 'warehouse_admin') {
-        warehouseField.style.display = 'block';
-        warehouseField.querySelector('select').required = true;
-    } else {
-        warehouseField.style.display = 'none';
-        warehouseField.querySelector('select').required = false;
-        warehouseField.querySelector('select').value = '';
-    }
-});
-
-// Trigger on page load if role is already selected
-if (document.getElementById('role').value === 'warehouse_admin') {
-    document.getElementById('warehouse_field').style.display = 'block';
-}
-</script>
 @endsection
 

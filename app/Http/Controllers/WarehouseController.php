@@ -1074,4 +1074,67 @@ class WarehouseController extends Controller
 
         return response()->json($transactions);
     }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(string $id)
+    {
+        $warehouse = Warehouse::findOrFail($id);
+        
+        $user = auth()->user();
+        
+        // Chỉ super admin và admin mới được xóa kho
+        if (!$user->canManageWarehouses()) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Bạn không có quyền xóa kho',
+                ], 403);
+            }
+            return redirect()->back()->with('error', 'Bạn không có quyền xóa kho');
+        }
+        
+        // Kiểm tra xem kho có đơn hàng không
+        if ($warehouse->orders()->count() > 0) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Không thể xóa kho vì đã có đơn hàng liên quan',
+                ], 400);
+            }
+            return redirect()->back()->with('error', 'Không thể xóa kho vì đã có đơn hàng liên quan');
+        }
+        
+        // Kiểm tra xem kho có tài xế không
+        if ($warehouse->drivers()->count() > 0) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Không thể xóa kho vì đã có tài xế liên quan',
+                ], 400);
+            }
+            return redirect()->back()->with('error', 'Không thể xóa kho vì đã có tài xế liên quan');
+        }
+        
+        // Kiểm tra xem kho có người dùng không
+        if ($warehouse->users()->count() > 0) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Không thể xóa kho vì đã có người dùng liên quan',
+                ], 400);
+            }
+            return redirect()->back()->with('error', 'Không thể xóa kho vì đã có người dùng liên quan');
+        }
+        
+        // Xóa các giao dịch kho
+        $warehouse->transactions()->delete();
+        
+        $warehouse->delete();
+        
+        if (request()->expectsJson()) {
+            return response()->json([
+                'message' => 'Kho đã được xóa thành công',
+            ]);
+        }
+        
+        return redirect()->route('admin.warehouses.index')->with('success', 'Kho đã được xóa thành công');
+    }
 }

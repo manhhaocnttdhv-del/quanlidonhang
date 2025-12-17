@@ -87,10 +87,18 @@ class OrderController extends Controller
     
     public function create()
     {
-        $customers = \App\Models\Customer::where('is_active', true)->orderBy('name')->get();
+        $user = auth()->user();
+        
+        // Load customers - Warehouse admin chỉ xem khách hàng của kho mình
+        $customersQuery = \App\Models\Customer::where('is_active', true);
+        
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $customersQuery->where('warehouse_id', $user->warehouse_id);
+        }
+        
+        $customers = $customersQuery->orderBy('name')->get();
         
         // Lấy kho của user (nếu là warehouse admin) hoặc kho mặc định
-        $user = auth()->user();
         $warehouse = null;
         
         if ($user->isWarehouseAdmin() && $user->warehouse_id) {
@@ -107,7 +115,47 @@ class OrderController extends Controller
     public function edit($id)
     {
         $order = Order::with(['warehouse', 'toWarehouse'])->findOrFail($id);
-        return view('admin.orders.edit', compact('order'));
+        
+        $user = auth()->user();
+        
+        // Load active customers for dropdown - Warehouse admin chỉ xem khách hàng của kho mình
+        $customersQuery = \App\Models\Customer::where('is_active', true);
+        
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $customersQuery->where('warehouse_id', $user->warehouse_id);
+        }
+        
+        $customers = $customersQuery->orderBy('name')->get();
+            
+        // Load all warehouses for dropdown
+        $warehouses = \App\Models\Warehouse::where('is_active', true)
+            ->orderBy('name')
+            ->get();
+            
+        // Load provinces from JSON file
+        $provinces = [];
+        $addressesPath = public_path('data/vietnam-addresses-full.json');
+        
+        if (file_exists($addressesPath)) {
+            $addressData = json_decode(file_get_contents($addressesPath), true);
+            
+            // Extract provinces from the 'provinces' key
+            if (isset($addressData['provinces']) && is_array($addressData['provinces'])) {
+                $provinces = array_map(function($province) {
+                    return [
+                        'name' => $province['name'] ?? '',
+                        'code' => $province['code'] ?? ''
+                    ];
+                }, $addressData['provinces']);
+                
+                // Sort provinces by name
+                usort($provinces, function($a, $b) {
+                    return strcmp($a['name'], $b['name']);
+                });
+            }
+        }
+        
+        return view('admin.orders.edit', compact('order', 'customers', 'warehouses', 'provinces'));
     }
 
     /**
@@ -283,35 +331,123 @@ class OrderController extends Controller
         $order = Order::findOrFail($id);
 
         $validated = $request->validate([
-            'sender_name' => 'sometimes|string|max:255',
-            'sender_phone' => 'sometimes|string|max:20',
-            'sender_address' => 'sometimes|string',
-            'receiver_name' => 'sometimes|string|max:255',
-            'receiver_phone' => 'sometimes|string|max:20',
-            'receiver_address' => 'sometimes|string',
-            'item_type' => 'nullable|string|max:255',
-            'weight' => 'sometimes|numeric|min:0',
-            'cod_amount' => 'nullable|numeric|min:0',
-            'service_type' => 'nullable|in:express,standard,economy',
+            'sender_name' => 'required|string|max:255',
+            'sender_phone' => 'required|string|max:20',
+            'sender_address' => 'required|string',
+            'sender_province' => 'required|string',
+            'sender_district' => 'required|string',
+            'receiver_name' => 'required|string|max:255',
+            'receiver_phone' => 'required|string|max:20',
+            'receiver_address' => 'required|string',
+            'receiver_province' => 'required|string',
+            'receiver_district' => 'required|string',
+            'item_type' => 'required|string|max:255',
+            'weight' => 'required|numeric|min:0.1',
+            'length' => 'nullable|numeric|min:0',
+            'width' => 'nullable|numeric|min:0',
+            'height' => 'nullable|numeric|min:0',
+            'cod_amount' => 'required|numeric|min:0',
+            'service_type' => 'required|in:express,standard,economy',
             'is_fragile' => 'nullable|boolean',
             'notes' => 'nullable|string',
+            'pickup_method' => 'required|in:pickup,warehouse',
+            'to_warehouse_id' => 'nullable|exists:warehouses,id',
         ]);
-        
-        // Convert checkbox value to boolean
-        if (isset($validated['is_fragile'])) {
-            $validated['is_fragile'] = (bool) $validated['is_fragile'];
-        }
 
-        $order->update($validated);
+        // Convert checkbox value to boolean
+        $validated['is_fragile'] = $request->has('is_fragile');
+
+        // Lấy thông tin kho nguồn dựa trên tỉnh người gửi
+        $originWarehouse = \App\Models\Warehouse::where('province', $validated['sender_province'])->first();
+        
+        // Tính toán lại phí vận chuyển nếu có thay đổi
+        $shippingFee = $this->calculateShippingFee(
+            $validated['sender_province'],
+            $validated['sender_district'],
+            $validated['receiver_province'],
+            $validated['receiver_district'],
+            $validated['weight'],
+            $validated['service_type'],
+            $validated['cod_amount']
+        );
+
+        // Cập nhật dữ liệu đơn hàng
+        $orderData = array_merge($validated, [
+            'shipping_fee' => $shippingFee,
+            'warehouse_id' => $originWarehouse->id ?? null,
+            'to_warehouse_id' => $validated['to_warehouse_id'] ?? null,
+            'updated_by' => auth()->id(),
+        ]);
+
+        $order->update($orderData);
 
         if ($request->expectsJson()) {
             return response()->json([
-                'message' => 'Đơn hàng đã được cập nhật',
+                'message' => 'Đơn hàng đã được cập nhật thành công',
                 'data' => $order->fresh(),
             ]);
         }
 
-        return redirect()->route('admin.orders.show', $order->id)->with('success', 'Đơn hàng đã được cập nhật');
+        return redirect()->route('admin.orders.show', $order->id)->with('success', 'Đơn hàng đã được cập nhật thành công');
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(string $id)
+    {
+        $order = Order::findOrFail($id);
+        $user = auth()->user();
+        
+        // Chỉ cho phép xóa đơn hàng ở trạng thái pending
+        if ($order->status !== 'pending') {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Chỉ có thể xóa đơn hàng ở trạng thái pending',
+                ], 403);
+            }
+            return back()->with('error', 'Chỉ có thể xóa đơn hàng ở trạng thái pending');
+        }
+        
+        // Kiểm tra quyền xóa đơn hàng
+        // Super admin/Admin có thể xóa bất kỳ đơn hàng pending nào
+        // Warehouse admin chỉ xóa được đơn hàng pending của kho mình
+        if ($user->isSuperAdmin() || $user->role === 'admin') {
+            // Cho phép xóa
+        } elseif ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            // Warehouse admin chỉ xóa được đơn hàng của kho mình
+            if ($order->warehouse_id != $user->warehouse_id) {
+                if (request()->expectsJson()) {
+                    return response()->json([
+                        'message' => 'Bạn không có quyền xóa đơn hàng này',
+                    ], 403);
+                }
+                return back()->with('error', 'Bạn không có quyền xóa đơn hàng này');
+            }
+        } else {
+            // Không có quyền
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Bạn không có quyền xóa đơn hàng này',
+                ], 403);
+            }
+            return back()->with('error', 'Bạn không có quyền xóa đơn hàng này');
+        }
+        
+        // Xóa các bản ghi liên quan
+        $order->statuses()->delete();
+        $order->warehouseTransactions()->delete();
+        
+        // Xóa đơn hàng
+        $order->delete();
+        
+        if (request()->expectsJson()) {
+            return response()->json([
+                'message' => 'Đơn hàng đã được xóa thành công',
+            ]);
+        }
+        
+        return redirect()->route('admin.orders.index')->with('success', 'Đơn hàng đã được xóa thành công');
     }
 
     /**

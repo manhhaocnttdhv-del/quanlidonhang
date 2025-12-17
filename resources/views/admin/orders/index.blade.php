@@ -74,6 +74,29 @@
                             <a href="{{ route('admin.orders.edit', $order->id) }}" class="btn btn-sm btn-warning" title="Sửa">
                                 <i class="fas fa-edit"></i>
                             </a>
+                            @php
+                                $user = auth()->user();
+                                $canDelete = false;
+                                if ($order->status === 'pending') {
+                                    // Super admin/Admin có thể xóa bất kỳ đơn hàng pending nào
+                                    if ($user->isSuperAdmin() || $user->role === 'admin') {
+                                        $canDelete = true;
+                                    }
+                                    // Warehouse admin chỉ xóa được đơn hàng pending của kho mình
+                                    elseif ($user->isWarehouseAdmin() && $user->warehouse_id && $order->warehouse_id == $user->warehouse_id) {
+                                        $canDelete = true;
+                                    }
+                                }
+                            @endphp
+                            @if($canDelete)
+                            <form action="{{ route('admin.orders.destroy', $order->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa đơn hàng này?');">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-sm btn-danger" title="Xóa">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                            @endif
                         </td>
                     </tr>
                     @empty

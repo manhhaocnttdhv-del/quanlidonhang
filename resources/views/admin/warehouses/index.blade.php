@@ -35,9 +35,26 @@
                 <p class="mb-0"><strong>Mã kho:</strong> {{ $warehouse->code }}</p>
             </div>
             <div class="card-footer">
-                <a href="{{ route('admin.warehouses.show', $warehouse->id) }}" class="btn btn-sm btn-primary">
+                <a href="{{ route('admin.warehouses.show', $warehouse->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết">
                     <i class="fas fa-eye me-1"></i>Xem chi tiết
                 </a>
+                @if(auth()->user()->canManageWarehouses())
+                    @php
+                        $hasOrders = $warehouse->orders()->count() > 0;
+                        $hasDrivers = $warehouse->drivers()->count() > 0;
+                        $hasUsers = $warehouse->users()->count() > 0;
+                        $canDelete = !$hasOrders && !$hasDrivers && !$hasUsers;
+                    @endphp
+                    @if($canDelete)
+                    <form action="{{ route('admin.warehouses.destroy', $warehouse->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa kho này?');">
+                        @csrf
+                        @method('DELETE')
+                        <button type="submit" class="btn btn-sm btn-danger" title="Xóa">
+                            <i class="fas fa-trash me-1"></i>Xóa
+                        </button>
+                    </form>
+                    @endif
+                @endif
             </div>
         </div>
     </div>

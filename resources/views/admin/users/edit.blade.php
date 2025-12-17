@@ -59,27 +59,17 @@
                         <select name="role" id="role" class="form-select @error('role') is-invalid @enderror" required>
                             <option value="">Chọn vai trò</option>
                             <option value="warehouse_admin" {{ old('role', $user->role) == 'warehouse_admin' ? 'selected' : '' }}>Admin Kho</option>
+                            <option value="admin" {{ old('role', $user->role) == 'admin' ? 'selected' : '' }}>Admin</option>
                         </select>
                         @error('role')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="mb-3" id="warehouse_field" style="display: {{ old('role', $user->role) == 'warehouse_admin' ? 'block' : 'none' }};">
-                        <label class="form-label">Kho <span class="text-danger">*</span></label>
-                        <select name="warehouse_id" class="form-select @error('warehouse_id') is-invalid @enderror">
-                            <option value="">Chọn kho</option>
-                            @foreach($warehouses ?? [] as $warehouse)
-                                <option value="{{ $warehouse->id }}" {{ old('warehouse_id', $user->warehouse_id) == $warehouse->id ? 'selected' : '' }}>
-                                    {{ $warehouse->name }} ({{ $warehouse->province ?? 'N/A' }})
-                                </option>
-                            @endforeach
-                        </select>
-                        @error('warehouse_id')
-                            <div class="invalid-feedback">{{ $message }}</div>
-                        @enderror
-                        <small class="text-muted">Bắt buộc chọn kho cho Admin Kho</small>
+                        @if($user->warehouse)
+                            <small class="text-muted d-block mt-1">Kho hiện tại: <strong>{{ $user->warehouse->name }}</strong> ({{ $user->warehouse->province ?? 'N/A' }})</small>
+                            <small class="text-muted">Để thay đổi kho, vui lòng sửa trong form quản lý kho.</small>
+                        @else
+                            <small class="text-muted d-block mt-1">Lưu ý: Để gán kho cho Admin Kho, vui lòng tạo kho và chọn admin kho trong form tạo kho.</small>
+                        @endif
                     </div>
                 </div>
             </div>
@@ -105,18 +95,5 @@
     </div>
 </div>
 
-<script>
-document.getElementById('role').addEventListener('change', function() {
-    const warehouseField = document.getElementById('warehouse_field');
-    if (this.value === 'warehouse_admin') {
-        warehouseField.style.display = 'block';
-        warehouseField.querySelector('select').required = true;
-    } else {
-        warehouseField.style.display = 'none';
-        warehouseField.querySelector('select').required = false;
-        warehouseField.querySelector('select').value = '';
-    }
-});
-</script>
 @endsection
 

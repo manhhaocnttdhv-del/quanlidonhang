@@ -62,8 +62,7 @@ class UserController extends Controller
             return redirect()->route('admin.dashboard')->with('error', 'Bạn không có quyền tạo nhân viên');
         }
 
-        $warehouses = Warehouse::where('is_active', true)->orderBy('name')->get();
-        return view('admin.users.create', compact('warehouses'));
+        return view('admin.users.create');
     }
 
     /**
@@ -83,23 +82,13 @@ class UserController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:6',
-            'role' => 'required|in:warehouse_admin,admin,manager,dispatcher,warehouse_staff,staff',
+            'role' => 'required|in:warehouse_admin,admin',
             'phone' => 'nullable|string|max:20',
-            'warehouse_id' => 'nullable|exists:warehouses,id',
             'is_active' => 'sometimes|boolean',
         ]);
 
-        // Nếu là warehouse_admin thì bắt buộc phải có warehouse_id
-        if ($validated['role'] === 'warehouse_admin' && empty($validated['warehouse_id'])) {
-            return redirect()->back()
-                ->withInput()
-                ->withErrors(['warehouse_id' => 'Vui lòng chọn kho cho admin kho']);
-        }
-
-        // Nếu không phải warehouse_admin thì không cần warehouse_id
-        if ($validated['role'] !== 'warehouse_admin') {
-            $validated['warehouse_id'] = null;
-        }
+        // Không cho phép gán kho khi tạo user - phải tạo kho và chọn admin kho trong form tạo kho
+        $validated['warehouse_id'] = null;
 
         $validated['password'] = Hash::make($validated['password']);
         $validated['is_active'] = $validated['is_active'] ?? true;
@@ -140,10 +129,9 @@ class UserController extends Controller
             return redirect()->route('admin.dashboard')->with('error', 'Bạn không có quyền sửa nhân viên');
         }
 
-        $user = User::findOrFail($id);
-        $warehouses = Warehouse::where('is_active', true)->orderBy('name')->get();
+        $user = User::with('warehouse')->findOrFail($id);
 
-        return view('admin.users.edit', compact('user', 'warehouses'));
+        return view('admin.users.edit', compact('user'));
     }
 
     /**
@@ -167,25 +155,16 @@ class UserController extends Controller
             'password' => 'nullable|string|min:6',
             'role' => 'sometimes|in:warehouse_admin,admin,manager,dispatcher,warehouse_staff,staff',
             'phone' => 'nullable|string|max:20',
-            'warehouse_id' => 'nullable|exists:warehouses,id',
             'is_active' => 'sometimes|boolean',
         ]);
 
-        // Nếu là warehouse_admin thì bắt buộc phải có warehouse_id
-        if (isset($validated['role']) && $validated['role'] === 'warehouse_admin' && empty($validated['warehouse_id'])) {
-            return redirect()->back()
-                ->withInput()
-                ->withErrors(['warehouse_id' => 'Vui lòng chọn kho cho admin kho']);
-        }
-
-        // Nếu không phải warehouse_admin thì không cần warehouse_id
-        if (isset($validated['role']) && $validated['role'] !== 'warehouse_admin') {
-            $validated['warehouse_id'] = null;
-        }
-
+        // Không cho phép thay đổi warehouse_id từ form edit - phải sửa trong form quản lý kho
         // Nếu đổi role từ warehouse_admin sang role khác, xóa warehouse_id
         if ($user->role === 'warehouse_admin' && isset($validated['role']) && $validated['role'] !== 'warehouse_admin') {
             $validated['warehouse_id'] = null;
+        } else {
+            // Giữ nguyên warehouse_id hiện tại
+            unset($validated['warehouse_id']);
         }
 
         if (!empty($validated['password'])) {

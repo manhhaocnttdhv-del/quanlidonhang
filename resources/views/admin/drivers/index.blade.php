@@ -54,9 +54,24 @@
                             </span>
                         </td>
                         <td>
-                            <a href="{{ route('admin.drivers.show', $driver->id) }}" class="btn btn-sm btn-primary">
+                            <a href="{{ route('admin.drivers.show', $driver->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết">
                                 <i class="fas fa-eye"></i>
                             </a>
+                            <a href="{{ route('admin.drivers.edit', $driver->id) }}" class="btn btn-sm btn-warning" title="Sửa">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                            @php
+                                $hasOrders = ($driver->pickup_orders_count ?? 0) > 0 || ($driver->delivery_orders_count ?? 0) > 0;
+                            @endphp
+                            @if(!$hasOrders)
+                            <form action="{{ route('admin.drivers.destroy', $driver->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa tài xế này?');">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-sm btn-danger" title="Xóa">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </form>
+                            @endif
                         </td>
                     </tr>
                     @empty
@@ -72,7 +87,7 @@
 
 <!-- Add Driver Modal -->
 <div class="modal fade" id="addDriverModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <form action="{{ route('admin.drivers.store') }}" method="POST">
                 @csrf
@@ -80,63 +95,93 @@
                     <h5 class="modal-title">Thêm tài xế mới</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Tên tài xế <span class="text-danger">*</span></label>
-                        <input type="text" name="name" class="form-control" required>
+                <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Tên tài xế <span class="text-danger">*</span></label>
+                                <input type="text" name="name" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Số điện thoại <span class="text-danger">*</span></label>
+                                <input type="text" name="phone" class="form-control" required>
+                            </div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Số điện thoại <span class="text-danger">*</span></label>
-                        <input type="text" name="phone" class="form-control" required>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Loại tài xế <span class="text-danger">*</span></label>
+                                <select name="driver_type" class="form-select" required>
+                                    <option value="shipper">Tài xế Shipper</option>
+                                    <option value="intercity_driver">Tài xế vận chuyển tỉnh</option>
+                                </select>
+                                <small class="text-muted">Shipper: Giao hàng nội thành. Vận chuyển tỉnh: Vận chuyển hàng giữa các tỉnh</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3" id="warehouse_field">
+                                <label class="form-label">Kho</label>
+                                @if(auth()->user()->isWarehouseAdmin() && auth()->user()->warehouse)
+                                    {{-- Warehouse admin: Ẩn dropdown, tự động dùng kho của họ --}}
+                                    <input type="hidden" name="warehouse_id" value="{{ auth()->user()->warehouse_id }}">
+                                    <input type="text" class="form-control" value="{{ auth()->user()->warehouse->name }}" disabled>
+                                    <small class="text-muted">Tài xế sẽ được gán vào kho của bạn</small>
+                                @else
+                                    {{-- Super admin/Admin: Hiển thị dropdown để chọn --}}
+                                    <select name="warehouse_id" class="form-select">
+                                        <option value="">Chọn kho</option>
+                                        @foreach($warehouses ?? [] as $warehouse)
+                                            <option value="{{ $warehouse->id }}">{{ $warehouse->name }}</option>
+                                        @endforeach
+                                    </select>
+                                @endif
+                            </div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Loại tài xế <span class="text-danger">*</span></label>
-                        <select name="driver_type" class="form-select" required>
-                            <option value="shipper">Tài xế Shipper</option>
-                            <option value="intercity_driver">Tài xế vận chuyển tỉnh</option>
-                        </select>
-                        <small class="text-muted">Shipper: Giao hàng nội thành. Vận chuyển tỉnh: Vận chuyển hàng giữa các tỉnh</small>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Khu vực phụ trách</label>
+                                <input type="text" name="area" class="form-control" placeholder="VD: Thành phố Vinh, Nghệ An hoặc Vận chuyển các tỉnh">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Loại xe</label>
+                                <input type="text" name="vehicle_type" class="form-control" placeholder="VD: Xe máy, Xe tải nhỏ, Xe tải lớn">
+                            </div>
+                        </div>
                     </div>
-                    <div class="mb-3" id="warehouse_field">
-                        <label class="form-label">Kho</label>
-                        @if(auth()->user()->isWarehouseAdmin() && auth()->user()->warehouse)
-                            {{-- Warehouse admin: Ẩn dropdown, tự động dùng kho của họ --}}
-                            <input type="hidden" name="warehouse_id" value="{{ auth()->user()->warehouse_id }}">
-                            <input type="text" class="form-control" value="{{ auth()->user()->warehouse->name }}" disabled>
-                            <small class="text-muted">Tài xế sẽ được gán vào kho của bạn</small>
-                        @else
-                            {{-- Super admin/Admin: Hiển thị dropdown để chọn --}}
-                            <select name="warehouse_id" class="form-select">
-                                <option value="">Chọn kho</option>
-                                @foreach($warehouses ?? [] as $warehouse)
-                                    <option value="{{ $warehouse->id }}">{{ $warehouse->name }}</option>
-                                @endforeach
-                            </select>
-                        @endif
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Biển số xe</label>
+                                <input type="text" name="vehicle_number" class="form-control" placeholder="VD: 37A-12345">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Email</label>
+                                <input type="email" name="email" class="form-control">
+                            </div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Khu vực phụ trách</label>
-                        <input type="text" name="area" class="form-control" placeholder="VD: Thành phố Vinh, Nghệ An hoặc Vận chuyển các tỉnh">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Loại xe</label>
-                        <input type="text" name="vehicle_type" class="form-control" placeholder="VD: Xe máy, Xe tải nhỏ, Xe tải lớn">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Biển số xe</label>
-                        <input type="text" name="vehicle_number" class="form-control" placeholder="VD: 37A-12345">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Email</label>
-                        <input type="email" name="email" class="form-control">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Số bằng lái</label>
-                        <input type="text" name="license_number" class="form-control">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Ghi chú</label>
-                        <textarea name="notes" class="form-control" rows="2"></textarea>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Số bằng lái</label>
+                                <input type="text" name="license_number" class="form-control">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Ghi chú</label>
+                                <textarea name="notes" class="form-control" rows="3"></textarea>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">

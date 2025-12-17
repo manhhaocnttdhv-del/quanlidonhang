@@ -43,11 +43,13 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     Route::get('/customers/{id}', [CustomerController::class, 'show'])->name('customers.show');
     Route::get('/customers/{id}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
     Route::put('/customers/{id}', [CustomerController::class, 'update'])->name('customers.update');
+    Route::delete('/customers/{id}', [CustomerController::class, 'destroy'])->name('customers.destroy');
     
     // Orders
     Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
     Route::get('/orders/create', [OrderController::class, 'create'])->name('orders.create');
     Route::post('/orders', [OrderController::class, 'store'])->name('orders.store');
+    Route::delete('/orders/{id}', [OrderController::class, 'destroy'])->name('orders.destroy');
     Route::get('/orders/{id}', [OrderController::class, 'show'])->name('orders.show');
     Route::get('/orders/{id}/edit', [OrderController::class, 'edit'])->name('orders.edit');
     Route::put('/orders/{id}', [OrderController::class, 'update'])->name('orders.update');
@@ -66,6 +68,7 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     Route::get('/warehouses/{id}', [WarehouseController::class, 'show'])->name('warehouses.show');
     Route::get('/warehouses/{id}/edit', [WarehouseController::class, 'edit'])->name('warehouses.edit');
     Route::put('/warehouses/{id}', [WarehouseController::class, 'update'])->name('warehouses.update');
+    Route::delete('/warehouses/{id}', [WarehouseController::class, 'destroy'])->name('warehouses.destroy');
     Route::post('/warehouses/receive-order', [WarehouseController::class, 'receiveOrder'])->name('warehouses.receive-order');
     Route::post('/warehouses/bulk-receive-order', [WarehouseController::class, 'bulkReceiveOrder'])->name('warehouses.bulk-receive-order');
     Route::post('/warehouses/release-order', [WarehouseController::class, 'releaseOrder'])->name('warehouses.release-order');
@@ -106,6 +109,9 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     Route::get('/drivers', [DriverController::class, 'index'])->name('drivers.index');
     Route::post('/drivers', [DriverController::class, 'store'])->name('drivers.store');
     Route::get('/drivers/{id}', [DriverController::class, 'show'])->name('drivers.show');
+    Route::get('/drivers/{id}/edit', [DriverController::class, 'edit'])->name('drivers.edit');
+    Route::put('/drivers/{id}', [DriverController::class, 'update'])->name('drivers.update');
+    Route::delete('/drivers/{id}', [DriverController::class, 'destroy'])->name('drivers.destroy');
     
     // Routes
     Route::get('/routes', [RouteController::class, 'index'])->name('routes.index');

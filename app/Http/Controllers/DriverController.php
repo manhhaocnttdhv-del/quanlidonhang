@@ -38,7 +38,9 @@ class DriverController extends Controller
             $query->where('driver_type', $request->driver_type);
         }
 
-        $drivers = $query->orderBy('created_at', 'desc')->paginate(20);
+        $drivers = $query->withCount(['pickupOrders', 'deliveryOrders'])
+            ->orderBy('created_at', 'desc')
+            ->paginate(20);
 
         if ($request->expectsJson()) {
             return response()->json($drivers);
@@ -101,10 +103,43 @@ class DriverController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(string $id)
+    public function show(Request $request, string $id)
     {
         $driver = Driver::with(['warehouse', 'pickupOrders', 'deliveryOrders'])->findOrFail($id);
-        return response()->json($driver);
+        
+        if ($request->expectsJson()) {
+            return response()->json($driver);
+        }
+        
+        return view('admin.drivers.show', compact('driver'));
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit(string $id)
+    {
+        $driver = Driver::with('warehouse')->findOrFail($id);
+        
+        $user = auth()->user();
+        
+        // Warehouse admin chỉ sửa được tài xế của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            if ($driver->warehouse_id != $user->warehouse_id) {
+                return redirect()->route('admin.drivers.index')->with('error', 'Bạn không có quyền sửa tài xế này');
+            }
+        }
+        
+        // Super admin và admin xem tất cả kho, warehouse admin chỉ xem kho của mình
+        if ($user->canManageWarehouses()) {
+            $warehouses = Warehouse::where('is_active', true)->orderBy('name')->get();
+        } else {
+            $warehouses = Warehouse::where('id', $user->warehouse_id)
+                ->where('is_active', true)
+                ->get();
+        }
+        
+        return view('admin.drivers.edit', compact('driver', 'warehouses'));
     }
 
     /**
@@ -115,16 +150,29 @@ class DriverController extends Controller
         $driver = Driver::findOrFail($id);
 
         $user = auth()->user();
+        
+        // Warehouse admin chỉ sửa được tài xế của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            if ($driver->warehouse_id != $user->warehouse_id) {
+                if ($request->expectsJson()) {
+                    return response()->json([
+                        'message' => 'Bạn không có quyền sửa tài xế này',
+                    ], 403);
+                }
+                return redirect()->back()->with('error', 'Bạn không có quyền sửa tài xế này');
+            }
+        }
+        
         $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'phone' => 'sometimes|string|max:20',
+            'name' => 'required|string|max:255',
+            'phone' => 'required|string|max:20',
             'email' => 'nullable|email|max:255',
             'license_number' => 'nullable|string|max:50',
             'vehicle_type' => 'nullable|string|max:255',
             'vehicle_number' => 'nullable|string|max:50',
             'area' => 'nullable|string|max:255',
             'warehouse_id' => 'nullable|exists:warehouses,id',
-            'driver_type' => 'sometimes|in:shipper,intercity_driver',
+            'driver_type' => 'required|in:shipper,intercity_driver',
             'is_active' => 'sometimes|boolean',
             'notes' => 'nullable|string',
         ]);
@@ -136,10 +184,58 @@ class DriverController extends Controller
 
         $driver->update($validated);
 
-        return response()->json([
-            'message' => 'Tài xế đã được cập nhật',
-            'data' => $driver->fresh(),
-        ]);
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'Tài xế đã được cập nhật',
+                'data' => $driver->fresh(),
+            ]);
+        }
+        
+        return redirect()->route('admin.drivers.index')->with('success', 'Tài xế đã được cập nhật thành công');
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(string $id)
+    {
+        $driver = Driver::findOrFail($id);
+        
+        $user = auth()->user();
+        
+        // Warehouse admin chỉ xóa được tài xế của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            if ($driver->warehouse_id != $user->warehouse_id) {
+                if (request()->expectsJson()) {
+                    return response()->json([
+                        'message' => 'Bạn không có quyền xóa tài xế này',
+                    ], 403);
+                }
+                return redirect()->back()->with('error', 'Bạn không có quyền xóa tài xế này');
+            }
+        }
+        
+        // Kiểm tra xem tài xế có đơn hàng không
+        $hasOrders = $driver->pickupOrders()->count() > 0 || $driver->deliveryOrders()->count() > 0;
+        
+        if ($hasOrders) {
+            if (request()->expectsJson()) {
+                return response()->json([
+                    'message' => 'Không thể xóa tài xế vì đã có đơn hàng liên quan',
+                ], 400);
+            }
+            return redirect()->back()->with('error', 'Không thể xóa tài xế vì đã có đơn hàng liên quan');
+        }
+        
+        $driver->delete();
+        
+        if (request()->expectsJson()) {
+            return response()->json([
+                'message' => 'Tài xế đã được xóa thành công',
+            ]);
+        }
+        
+        return redirect()->route('admin.drivers.index')->with('success', 'Tài xế đã được xóa thành công');
     }
 
     /**
