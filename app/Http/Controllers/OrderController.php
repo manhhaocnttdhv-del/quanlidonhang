@@ -344,12 +344,12 @@ class OrderController extends Controller
             'sender_phone' => 'required|string|max:20',
             'sender_address' => 'required|string',
             'sender_province' => 'required|string',
-            'sender_district' => 'required|string',
+            'sender_district' => 'nullable|string',
             'receiver_name' => 'required|string|max:255',
             'receiver_phone' => 'required|string|max:20',
             'receiver_address' => 'required|string',
             'receiver_province' => 'required|string',
-            'receiver_district' => 'required|string',
+            'receiver_district' => 'nullable|string',
             'item_type' => 'required|string|max:255',
             'weight' => 'required|numeric|min:0.1',
             'length' => 'nullable|numeric|min:0',
@@ -359,7 +359,7 @@ class OrderController extends Controller
             'service_type' => 'required|in:express,standard,economy',
             'is_fragile' => 'nullable|boolean',
             'notes' => 'nullable|string',
-            'pickup_method' => 'required|in:pickup,warehouse',
+            'pickup_method' => 'required|in:driver,warehouse',
             'to_warehouse_id' => 'nullable|exists:warehouses,id',
         ]);
 
@@ -372,21 +372,25 @@ class OrderController extends Controller
         // Tính toán lại phí vận chuyển nếu có thay đổi
         $shippingFee = $this->calculateShippingFee(
             $validated['sender_province'],
-            $validated['sender_district'],
+            $validated['sender_district'] ?? '',
             $validated['receiver_province'],
-            $validated['receiver_district'],
+            $validated['receiver_district'] ?? '',
             $validated['weight'],
             $validated['service_type'],
             $validated['cod_amount']
         );
 
-        // Cập nhật dữ liệu đơn hàng
+        // Cập nhật dữ liệu đơn hàng - KHÔNG thay đổi status
         $orderData = array_merge($validated, [
             'shipping_fee' => $shippingFee,
             'warehouse_id' => $originWarehouse->id ?? null,
             'to_warehouse_id' => $validated['to_warehouse_id'] ?? null,
             'updated_by' => auth()->id(),
         ]);
+        
+        // Loại bỏ status và pickup_method khỏi orderData để không thay đổi khi cập nhật
+        unset($orderData['status']);
+        unset($orderData['pickup_method']);
 
         $order->update($orderData);
 
