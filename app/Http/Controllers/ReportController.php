@@ -89,8 +89,8 @@ class ReportController extends Controller
             });
         }
         
-        // Lấy đơn hàng thất bại (bao gồm cả đơn hàng xuất kho)
-        $failedOrdersQuery = Order::where('status', 'failed')
+        // Lấy đơn hàng thất bại và đã hủy (bao gồm cả đơn hàng xuất kho)
+        $failedOrdersQuery = Order::whereIn('status', ['failed', 'cancelled'])
             ->whereDate('updated_at', today());
         if ($warehouseFilter) {
             $failedOrdersQuery->where(function($q) use ($warehouseFilter) {
@@ -119,65 +119,291 @@ class ReportController extends Controller
             'total_orders' => $allDailyOrders->count(),
             'delivered_orders' => $deliveredOrders->count(),
             'failed_orders' => $failedOrders->count(),
-            // Doanh thu = COD đã thu (cod_collected) + Phí vận chuyển (chỉ tính đơn hàng đã giao thành công)
+            // Doanh thu = COD đã thu (cod_collected) + Phí vận chuyển + Phí trả hàng (chỉ tính đơn hàng đã giao thành công)
             'total_revenue' => $deliveredOrders->sum(function($order) {
-                return ($order->cod_collected ?? $order->cod_amount ?? 0) + ($order->shipping_fee ?? 0);
+                $cod = $order->cod_collected ?? $order->cod_amount ?? 0;
+                $shipping = $order->shipping_fee ?? 0;
+                $returnFee = $order->return_fee ?? 0;
+                return $cod + $shipping + $returnFee;
             }),
         ];
         
-        // Lấy tất cả đơn hàng trong khoảng thời gian: có warehouse_id = kho này HOẶC có transaction 'out' từ kho này
-        $reportDataQuery = Order::whereBetween('created_at', [$dateFrom, $dateTo]);
+        $allOrdersQuery = Order::whereBetween('created_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        
+        $deliveredOrdersQuery = Order::where('status', 'delivered')
+            ->whereNotNull('delivered_at')
+            ->whereBetween('delivered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        
+        $failedOrdersQuery = Order::whereIn('status', ['failed', 'cancelled'])
+            ->whereBetween('updated_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        
         if ($warehouseFilter) {
-            $reportDataQuery->where(function($q) use ($warehouseFilter) {
+            $allOrdersQuery->where(function($q) use ($warehouseFilter) {
                 $q->where('warehouse_id', $warehouseFilter)
                   ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
-                      $transQ->where('warehouse_id', $warehouseFilter)
-                            ->where('type', 'out');
+                      $transQ->where('warehouse_id', $warehouseFilter)->where('type', 'out');
+                  });
+            });
+            
+            $deliveredOrdersQuery->where(function($q) use ($warehouseFilter) {
+                $q->where('warehouse_id', $warehouseFilter)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                      $transQ->where('warehouse_id', $warehouseFilter)->where('type', 'out');
+                  });
+            });
+            
+            $failedOrdersQuery->where(function($q) use ($warehouseFilter) {
+                $q->where('warehouse_id', $warehouseFilter)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                      $transQ->where('warehouse_id', $warehouseFilter)->where('type', 'out');
                   });
             });
         }
         
-        // Tính báo cáo dựa trên kho gửi (từ transaction 'out' đầu tiên) hoặc warehouse_id hiện tại
-        // Lấy tất cả đơn hàng trong khoảng thời gian
-        $allOrders = $reportDataQuery->get();
+        $allOrders = $allOrdersQuery->with('warehouseTransactions')->get();
+        $deliveredOrders = $deliveredOrdersQuery->with('warehouseTransactions')->get();
+        $failedOrders = $failedOrdersQuery->get();
         
-        // Lọc lại để chỉ lấy đơn hàng có kho gửi = kho filter (nếu có)
+        \Log::info('Report Data', [
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
+            'warehouse_filter' => $warehouseFilter,
+            'all_orders_count' => $allOrders->count(),
+            'delivered_orders_count' => $deliveredOrders->count(),
+            'failed_orders_count' => $failedOrders->count(),
+        ]);
+        
         if ($warehouseFilter) {
             $allOrders = $allOrders->filter(function($order) use ($warehouseFilter) {
-                // Nếu warehouse_id = kho filter, tính cho kho này
-                if ($order->warehouse_id == $warehouseFilter) {
-                    return true;
-                }
-                // Nếu có transaction 'out' từ kho filter, tính cho kho này
-                $firstOutTransaction = WarehouseTransaction::where('order_id', $order->id)
-                    ->where('type', 'out')
-                    ->orderBy('transaction_date', 'asc')
-                    ->first();
-                return $firstOutTransaction && $firstOutTransaction->warehouse_id == $warehouseFilter;
+                if ($order->warehouse_id == $warehouseFilter) return true;
+                $firstOut = $order->warehouseTransactions->where('type', 'out')->sortBy('transaction_date')->first();
+                return $firstOut && $firstOut->warehouse_id == $warehouseFilter;
+            });
+            
+            $deliveredOrders = $deliveredOrders->filter(function($order) use ($warehouseFilter) {
+                if ($order->warehouse_id == $warehouseFilter) return true;
+                $firstOut = $order->warehouseTransactions->where('type', 'out')->sortBy('transaction_date')->first();
+                return $firstOut && $firstOut->warehouse_id == $warehouseFilter;
+            });
+            
+            $failedOrders = $failedOrders->filter(function($order) use ($warehouseFilter) {
+                if ($order->warehouse_id == $warehouseFilter) return true;
+                $firstOut = WarehouseTransaction::where('order_id', $order->id)->where('type', 'out')->orderBy('transaction_date', 'asc')->first();
+                return $firstOut && $firstOut->warehouse_id == $warehouseFilter;
             });
         }
         
-        // Nhóm theo ngày và tính toán
-        $reportData = $allOrders->groupBy(function($order) {
-            return $order->created_at->format('Y-m-d');
-        })->map(function($orders, $date) {
-            return [
-                'date' => $date,
-                'total_orders' => $orders->count(),
-                'delivered_orders' => $orders->where('status', 'delivered')->count(),
-                'failed_orders' => $orders->where('status', 'failed')->count(),
-                'total_revenue' => $orders->where('status', 'delivered')->sum(function($order) {
-                    return ($order->cod_collected ?? $order->cod_amount ?? 0) + ($order->shipping_fee ?? 0);
-                }),
-                'cod_collected' => $orders->where('status', 'delivered')->sum(function($order) {
-                    return $order->cod_collected ?? $order->cod_amount ?? 0;
-                }),
-                'shipping_fee' => $orders->where('status', 'delivered')->sum('shipping_fee'),
-                'cod_amount' => $orders->sum('cod_amount'),
-            ];
-        })->values()->sortByDesc('date');
+        $reportData = collect();
+        $dateFromTimestamp = strtotime($dateFrom);
+        $dateToTimestamp = strtotime($dateTo);
         
-        return view('admin.reports.index', compact('dailyStats', 'reportData'));
+        for ($date = $dateFromTimestamp; $date <= $dateToTimestamp; $date = strtotime('+1 day', $date)) {
+            $dateStr = date('Y-m-d', $date);
+            
+            $ordersCreatedOnDate = $allOrders->filter(function($order) use ($dateStr) {
+                if (!$order->created_at) return false;
+                try {
+                    $createdDate = is_string($order->created_at) ? date('Y-m-d', strtotime($order->created_at)) : $order->created_at->format('Y-m-d');
+                    return $createdDate === $dateStr;
+                } catch (\Exception $e) {
+                    return false;
+                }
+            });
+            
+            $ordersDeliveredOnDate = $deliveredOrders->filter(function($order) use ($dateStr) {
+                if (!$order->delivered_at) return false;
+                try {
+                    if (is_string($order->delivered_at)) {
+                        $deliveredDate = date('Y-m-d', strtotime($order->delivered_at));
+                    } else {
+                        $deliveredDate = $order->delivered_at->format('Y-m-d');
+                    }
+                    return $deliveredDate === $dateStr;
+                } catch (\Exception $e) {
+                    return false;
+                }
+            });
+            
+            $ordersFailedOnDate = $failedOrders->filter(function($order) use ($dateStr) {
+                if (!$order->updated_at) return false;
+                $updatedDate = is_string($order->updated_at) ? date('Y-m-d', strtotime($order->updated_at)) : $order->updated_at->format('Y-m-d');
+                return $updatedDate === $dateStr;
+            });
+            
+            $allOrdersOnDate = $ordersCreatedOnDate->merge($ordersDeliveredOnDate)->merge($ordersFailedOnDate)->unique('id');
+            
+            $totalRevenue = $ordersDeliveredOnDate->sum(function($order) {
+                $cod = $order->cod_collected ?? $order->cod_amount ?? 0;
+                $shipping = $order->shipping_fee ?? 0;
+                $returnFee = $order->return_fee ?? 0;
+                return $cod + $shipping + $returnFee;
+            });
+            
+            $codCollected = $ordersDeliveredOnDate->sum(function($order) {
+                return $order->cod_collected ?? $order->cod_amount ?? 0;
+            });
+            
+            $shippingFee = $ordersDeliveredOnDate->sum(function($order) {
+                return $order->shipping_fee ?? 0;
+            });
+            
+            $returnFee = $ordersDeliveredOnDate->sum(function($order) {
+                return $order->return_fee ?? 0;
+            });
+            
+            $codAmount = $allOrdersOnDate->sum(function($order) {
+                return $order->cod_amount ?? 0;
+            });
+            
+            $reportData->push([
+                'date' => $dateStr,
+                'total_orders' => $allOrdersOnDate->count(),
+                'delivered_orders' => $ordersDeliveredOnDate->count(),
+                'failed_orders' => $ordersFailedOnDate->count(),
+                'total_revenue' => $totalRevenue,
+                'cod_collected' => $codCollected,
+                'shipping_fee' => $shippingFee,
+                'return_fee' => $returnFee,
+                'cod_amount' => $codAmount,
+            ]);
+        }
+        
+        $reportData = $reportData->filter(function($row) {
+            return $row['total_orders'] > 0 || $row['delivered_orders'] > 0 || $row['failed_orders'] > 0;
+        })->sortByDesc('date')->values();
+        
+        return view('admin.reports.index', compact('dailyStats', 'reportData', 'dateFrom', 'dateTo', 'warehouseFilter'));
+    }
+    
+    public function detail(Request $request)
+    {
+        $dateFrom = $request->get('date_from');
+        $dateTo = $request->get('date_to');
+        $date = $request->get('date');
+        $type = $request->get('type', 'delivered');
+        
+        if (!$dateFrom && !$dateTo && !$date) {
+            return redirect()->route('admin.reports.index')->with('error', 'Vui lòng chọn ngày');
+        }
+        
+        if ($date && !$dateFrom && !$dateTo) {
+            $dateFrom = $date;
+            $dateTo = $date;
+        }
+        
+        if (!$dateFrom) {
+            $dateFrom = $dateTo;
+        }
+        if (!$dateTo) {
+            $dateTo = $dateFrom;
+        }
+        
+        $user = auth()->user();
+        $warehouseFilter = null;
+        if ($user && $user->isWarehouseAdmin() && $user->warehouse_id) {
+            $warehouseFilter = $user->warehouse_id;
+        }
+        
+        if ($type === 'delivered') {
+            $query = Order::where('status', 'delivered')
+                ->whereNotNull('delivered_at')
+                ->whereBetween('delivered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        } elseif ($type === 'failed') {
+            $query = Order::whereIn('status', ['failed', 'cancelled'])
+                ->whereBetween('updated_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        } else {
+            $query = Order::where(function($q) use ($dateFrom, $dateTo) {
+                $q->whereBetween('created_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59'])
+                  ->orWhere(function($subQ) use ($dateFrom, $dateTo) {
+                      $subQ->where('status', 'delivered')
+                           ->whereNotNull('delivered_at')
+                           ->whereBetween('delivered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+                  })
+                  ->orWhere(function($subQ) use ($dateFrom, $dateTo) {
+                      $subQ->whereIn('status', ['failed', 'cancelled'])
+                           ->whereBetween('updated_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+                  });
+            });
+        }
+        
+        if ($warehouseFilter) {
+            $query->where(function($q) use ($warehouseFilter) {
+                $q->where('warehouse_id', $warehouseFilter)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                      $transQ->where('warehouse_id', $warehouseFilter)->where('type', 'out');
+                  });
+            });
+        }
+        
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('tracking_number', 'like', "%{$search}%")
+                  ->orWhere('sender_name', 'like', "%{$search}%")
+                  ->orWhere('sender_phone', 'like', "%{$search}%")
+                  ->orWhere('receiver_name', 'like', "%{$search}%")
+                  ->orWhere('receiver_phone', 'like', "%{$search}%")
+                  ->orWhere('receiver_address', 'like', "%{$search}%");
+            });
+        }
+        
+        if ($request->has('status') && $request->status) {
+            if ($request->status === 'cancelled_delivered') {
+                $query->where('status', 'delivered')
+                      ->where(function($q) {
+                          $q->whereNotNull('return_fee')
+                            ->orWhereHas('statuses', function($statusQ) {
+                                $statusQ->where('status', 'cancelled');
+                            });
+                      });
+            } else {
+                $query->where('status', $request->status);
+            }
+        }
+        
+        if ($request->has('warehouse_id') && $request->warehouse_id) {
+            $query->where('warehouse_id', $request->warehouse_id);
+        }
+        
+        if ($request->has('to_warehouse_id') && $request->to_warehouse_id) {
+            $query->where('to_warehouse_id', $request->to_warehouse_id);
+        }
+        
+        if ($request->has('driver_id') && $request->driver_id) {
+            $query->where('delivery_driver_id', $request->driver_id);
+        }
+        
+        $orders = $query->with([
+                'customer', 
+                'deliveryDriver', 
+                'warehouse', 
+                'toWarehouse', 
+                'warehouseTransactions',
+                'statuses' => function($q) {
+                    $q->orderBy('created_at', 'desc');
+                }
+            ])
+            ->orderByRaw('CASE 
+                WHEN status = "delivered" AND delivered_at IS NOT NULL THEN delivered_at
+                WHEN status IN ("failed", "cancelled") THEN updated_at
+                ELSE created_at
+            END DESC')
+            ->get();
+        
+        if ($warehouseFilter) {
+            $orders = $orders->filter(function($order) use ($warehouseFilter) {
+                if ($order->warehouse_id == $warehouseFilter) return true;
+                $firstOut = $order->warehouseTransactions->where('type', 'out')->sortBy('transaction_date')->first();
+                return $firstOut && $firstOut->warehouse_id == $warehouseFilter;
+            })->values();
+        }
+        
+        $title = $type === 'delivered' ? 'Đơn hàng đã giao' : ($type === 'failed' ? 'Đơn hàng thất bại/hủy' : 'Tất cả đơn hàng');
+        
+        $warehouses = Warehouse::where('is_active', true)->orderBy('name')->get();
+        $drivers = Driver::where('is_active', true)->orderBy('name')->get();
+        
+        return view('admin.reports.detail', compact('orders', 'date', 'dateFrom', 'dateTo', 'type', 'title', 'warehouses', 'drivers'));
     }
     
     /**
@@ -335,15 +561,22 @@ class ReportController extends Controller
                 ->count();
 
             // Thống kê theo ngày (trong khoảng thời gian)
-            $statsInPeriod = Order::where('warehouse_id', $warehouse->id)
-                ->whereBetween('created_at', [$dateFrom, $dateTo])
+            $statsInPeriod = Order::where(function($q) use ($warehouse) {
+                    $q->where('warehouse_id', $warehouse->id)
+                      ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouse) {
+                          $transQ->where('warehouse_id', $warehouse->id)->where('type', 'out');
+                      });
+                })
+                ->whereBetween('created_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59'])
                 ->selectRaw('
                     COUNT(*) as total_orders,
                     SUM(CASE WHEN status = "delivered" THEN 1 ELSE 0 END) as delivered_orders,
                     SUM(CASE WHEN status = "in_warehouse" THEN 1 ELSE 0 END) as in_warehouse_orders,
                     SUM(CASE WHEN status = "in_transit" THEN 1 ELSE 0 END) as in_transit_orders,
                     SUM(shipping_fee) as total_shipping_revenue,
-                    SUM(cod_amount) as total_cod_amount
+                    SUM(return_fee) as total_return_fee,
+                    SUM(cod_amount) as total_cod_amount,
+                    SUM(cod_collected) as total_cod_collected
                 ')
                 ->first();
 
@@ -394,6 +627,8 @@ class ReportController extends Controller
                 ->where('is_active', true)
                 ->get(['name', 'email', 'phone']);
 
+            $totalRevenue = ($statsInPeriod->total_shipping_revenue ?? 0) + ($statsInPeriod->total_return_fee ?? 0);
+            
             $warehouseStats[] = [
                 'warehouse' => $warehouse,
                 'current_inventory' => $currentInventory,
@@ -403,7 +638,10 @@ class ReportController extends Controller
                 'in_warehouse_orders' => $statsInPeriod->in_warehouse_orders ?? 0,
                 'in_transit_orders' => $statsInPeriod->in_transit_orders ?? 0,
                 'total_shipping_revenue' => $statsInPeriod->total_shipping_revenue ?? 0,
+                'total_return_fee' => $statsInPeriod->total_return_fee ?? 0,
+                'total_revenue' => $totalRevenue,
                 'total_cod_amount' => $statsInPeriod->total_cod_amount ?? 0,
+                'total_cod_collected' => $statsInPeriod->total_cod_collected ?? 0,
                 'in_transactions' => $inTransactions,
                 'out_transactions' => $outTransactions,
                 'received_from_other_warehouses' => $receivedFromOtherWarehouses,
@@ -423,7 +661,10 @@ class ReportController extends Controller
             'total_orders' => array_sum(array_column($warehouseStats, 'total_orders')),
             'total_delivered' => array_sum(array_column($warehouseStats, 'delivered_orders')),
             'total_shipping_revenue' => array_sum(array_column($warehouseStats, 'total_shipping_revenue')),
+            'total_return_fee' => array_sum(array_column($warehouseStats, 'total_return_fee')),
+            'total_revenue' => array_sum(array_column($warehouseStats, 'total_revenue')),
             'total_cod_amount' => array_sum(array_column($warehouseStats, 'total_cod_amount')),
+            'total_cod_collected' => array_sum(array_column($warehouseStats, 'total_cod_collected')),
         ];
 
         if ($request->expectsJson()) {
@@ -434,5 +675,304 @@ class ReportController extends Controller
         }
 
         return view('admin.reports.warehouses-overview', compact('warehouseStats', 'totalStats', 'dateFrom', 'dateTo'));
+    }
+
+    public function warehouseOrders(Request $request, string $warehouseId)
+    {
+        $warehouse = \App\Models\Warehouse::findOrFail($warehouseId);
+        
+        $dateFrom = $request->get('date_from', date('Y-m-d', strtotime('-30 days')));
+        $dateTo = $request->get('date_to', date('Y-m-d'));
+        
+        $query = Order::where(function($q) use ($warehouseId) {
+            $q->where('warehouse_id', $warehouseId)
+              ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseId) {
+                  $transQ->where('warehouse_id', $warehouseId);
+              });
+        })
+        ->whereBetween('created_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('tracking_number', 'like', "%{$search}%")
+                  ->orWhere('sender_name', 'like', "%{$search}%")
+                  ->orWhere('sender_phone', 'like', "%{$search}%")
+                  ->orWhere('receiver_name', 'like', "%{$search}%")
+                  ->orWhere('receiver_phone', 'like', "%{$search}%")
+                  ->orWhere('receiver_address', 'like', "%{$search}%");
+            });
+        }
+        
+        if ($request->has('status') && $request->status) {
+            if ($request->status === 'cancelled_delivered') {
+                $query->where('status', 'delivered')
+                      ->where(function($q) {
+                          $q->whereNotNull('return_fee')
+                            ->orWhereHas('statuses', function($statusQ) {
+                                $statusQ->where('status', 'cancelled');
+                            });
+                      });
+            } else {
+                $query->where('status', $request->status);
+            }
+        }
+        
+        if ($request->has('to_warehouse_id') && $request->to_warehouse_id) {
+            $query->where('to_warehouse_id', $request->to_warehouse_id);
+        }
+        
+        if ($request->has('driver_id') && $request->driver_id) {
+            $query->where('delivery_driver_id', $request->driver_id);
+        }
+        
+        $orders = $query->with([
+                'customer',
+                'deliveryDriver',
+                'warehouse',
+                'toWarehouse',
+                'warehouseTransactions',
+                'statuses' => function($q) {
+                    $q->orderBy('created_at', 'desc');
+                }
+            ])
+            ->orderByRaw('CASE 
+                WHEN status = "delivered" THEN 1
+                WHEN status = "in_warehouse" THEN 2
+                WHEN status = "in_transit" THEN 3
+                WHEN status = "out_for_delivery" THEN 4
+                WHEN status = "failed" THEN 5
+                WHEN status = "cancelled" THEN 6
+                ELSE 7
+            END')
+            ->orderBy('created_at', 'desc')
+            ->get();
+        
+        $title = "Tất cả đơn hàng - Kho {$warehouse->name}";
+        
+        $warehouses = Warehouse::where('is_active', true)->orderBy('name')->get();
+        $drivers = Driver::where('is_active', true)->orderBy('name')->get();
+        
+        return view('admin.reports.warehouse-orders', compact('orders', 'warehouse', 'title', 'dateFrom', 'dateTo', 'warehouses', 'drivers'));
+    }
+    
+    public function exportCSV(Request $request)
+    {
+        $exportType = $request->get('export_type', 'detail');
+        
+        if ($exportType === 'detail') {
+            $dateFrom = $request->get('date_from');
+            $dateTo = $request->get('date_to');
+            $date = $request->get('date');
+            $searchType = $request->get('type', 'delivered');
+            
+            if (!$dateFrom && !$dateTo && !$date) {
+                return redirect()->back()->with('error', 'Vui lòng chọn ngày');
+            }
+            
+            if ($date && !$dateFrom && !$dateTo) {
+                $dateFrom = $date;
+                $dateTo = $date;
+            }
+            
+            if (!$dateFrom) {
+                $dateFrom = $dateTo;
+            }
+            if (!$dateTo) {
+                $dateTo = $dateFrom;
+            }
+            
+            $user = auth()->user();
+            $warehouseFilter = null;
+            if ($user && $user->isWarehouseAdmin() && $user->warehouse_id) {
+                $warehouseFilter = $user->warehouse_id;
+            }
+            
+            if ($searchType === 'delivered') {
+                $query = Order::where('status', 'delivered')
+                    ->whereNotNull('delivered_at')
+                    ->whereBetween('delivered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+            } elseif ($searchType === 'failed') {
+                $query = Order::whereIn('status', ['failed', 'cancelled'])
+                    ->whereBetween('updated_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+            } else {
+                $query = Order::where(function($q) use ($dateFrom, $dateTo) {
+                    $q->whereBetween('created_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59'])
+                      ->orWhere(function($subQ) use ($dateFrom, $dateTo) {
+                          $subQ->where('status', 'delivered')
+                               ->whereNotNull('delivered_at')
+                               ->whereBetween('delivered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+                      })
+                      ->orWhere(function($subQ) use ($dateFrom, $dateTo) {
+                          $subQ->whereIn('status', ['failed', 'cancelled'])
+                               ->whereBetween('updated_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+                      });
+                });
+            }
+            
+            if ($warehouseFilter) {
+                $query->where(function($q) use ($warehouseFilter) {
+                    $q->where('warehouse_id', $warehouseFilter)
+                      ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseFilter) {
+                          $transQ->where('warehouse_id', $warehouseFilter)->where('type', 'out');
+                      });
+                });
+            }
+            
+            if ($request->has('search') && $request->search) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('tracking_number', 'like', "%{$search}%")
+                      ->orWhere('sender_name', 'like', "%{$search}%")
+                      ->orWhere('sender_phone', 'like', "%{$search}%")
+                      ->orWhere('receiver_name', 'like', "%{$search}%")
+                      ->orWhere('receiver_phone', 'like', "%{$search}%");
+                });
+            }
+            
+            $orders = $query->with(['customer', 'deliveryDriver', 'warehouse', 'toWarehouse'])->get();
+            
+            if ($dateFrom == $dateTo) {
+                $filename = "bao_cao_chi_tiet_{$dateFrom}_{$searchType}.csv";
+            } else {
+                $filename = "bao_cao_chi_tiet_{$dateFrom}_to_{$dateTo}_{$searchType}.csv";
+            }
+        } else {
+            $warehouseId = $request->get('warehouse_id');
+            $dateFrom = $request->get('date_from', date('Y-m-d', strtotime('-30 days')));
+            $dateTo = $request->get('date_to', date('Y-m-d'));
+            
+            if (!$warehouseId) {
+                return redirect()->back()->with('error', 'Vui lòng chọn kho');
+            }
+            
+            $warehouse = Warehouse::findOrFail($warehouseId);
+            
+            $query = Order::where(function($q) use ($warehouseId) {
+                $q->where('warehouse_id', $warehouseId)
+                  ->orWhereHas('warehouseTransactions', function($transQ) use ($warehouseId) {
+                      $transQ->where('warehouse_id', $warehouseId);
+                  });
+            })
+            ->whereBetween('created_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+            
+            if ($request->has('search') && $request->search) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('tracking_number', 'like', "%{$search}%")
+                      ->orWhere('sender_name', 'like', "%{$search}%")
+                      ->orWhere('sender_phone', 'like', "%{$search}%")
+                      ->orWhere('receiver_name', 'like', "%{$search}%")
+                      ->orWhere('receiver_phone', 'like', "%{$search}%");
+                });
+            }
+            
+            if ($request->has('status') && $request->status) {
+                if ($request->status === 'cancelled_delivered') {
+                    $query->where('status', 'delivered')
+                          ->where(function($q) {
+                              $q->whereNotNull('return_fee')
+                                ->orWhereHas('statuses', function($statusQ) {
+                                    $statusQ->where('status', 'cancelled');
+                                });
+                          });
+                } else {
+                    $query->where('status', $request->status);
+                }
+            }
+            
+            if ($request->has('to_warehouse_id') && $request->to_warehouse_id) {
+                $query->where('to_warehouse_id', $request->to_warehouse_id);
+            }
+            
+            if ($request->has('driver_id') && $request->driver_id) {
+                $query->where('delivery_driver_id', $request->driver_id);
+            }
+            
+            $orders = $query->with(['customer', 'deliveryDriver', 'warehouse', 'toWarehouse', 'statuses'])->get();
+            
+            $filename = "bao_cao_kho_{$warehouse->code}_{$dateFrom}_to_{$dateTo}.csv";
+        }
+        
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+        ];
+        
+        $callback = function() use ($orders) {
+            $file = fopen('php://output', 'w');
+            
+            fprintf($file, chr(0xEF).chr(0xBB).chr(0xBF));
+            
+            fputcsv($file, [
+                'Mã vận đơn',
+                'Người gửi',
+                'SĐT người gửi',
+                'Người nhận',
+                'SĐT người nhận',
+                'Địa chỉ nhận',
+                'Tỉnh/TP',
+                'Kho gửi',
+                'Kho nhận',
+                'Tài xế',
+                'SĐT tài xế',
+                'COD',
+                'COD đã thu',
+                'Phí VC',
+                'Phí trả hàng',
+                'Doanh thu',
+                'Trạng thái',
+                'Ngày tạo',
+                'Ngày giao',
+                'Ghi chú'
+            ], ';');
+            
+            foreach ($orders as $order) {
+                $isReturnOrder = false;
+                $hasCancelledStatus = false;
+                
+                if ($order->return_fee && $order->return_fee > 0) {
+                    $isReturnOrder = true;
+                }
+                
+                if ($order->statuses && $order->statuses->isNotEmpty()) {
+                    $hasCancelledStatus = $order->statuses->where('status', 'cancelled')->isNotEmpty();
+                }
+                
+                $statusText = $order->status;
+                if ($order->status === 'delivered' && ($isReturnOrder || $hasCancelledStatus)) {
+                    $statusText = 'Đã hủy - Đã giao (trả hàng)';
+                }
+                
+                $revenue = ($order->cod_collected ?? 0) + ($order->shipping_fee ?? 0) + ($order->return_fee ?? 0);
+                
+                fputcsv($file, [
+                    $order->tracking_number,
+                    $order->sender_name,
+                    $order->sender_phone,
+                    $order->receiver_name,
+                    $order->receiver_phone,
+                    $order->receiver_address,
+                    $order->receiver_province,
+                    $order->warehouse ? $order->warehouse->name : 'N/A',
+                    $order->toWarehouse ? $order->toWarehouse->name : 'Giao trực tiếp',
+                    $order->deliveryDriver ? $order->deliveryDriver->name : 'Chưa phân công',
+                    $order->deliveryDriver ? $order->deliveryDriver->phone : '',
+                    $order->cod_amount ?? 0,
+                    $order->cod_collected ?? 0,
+                    $order->shipping_fee ?? 0,
+                    $order->return_fee ?? 0,
+                    $revenue,
+                    $statusText,
+                    $order->created_at ? $order->created_at->format('d/m/Y H:i') : '',
+                    $order->delivered_at ? $order->delivered_at->format('d/m/Y H:i') : '',
+                    $order->delivery_notes ?? $order->notes ?? ''
+                ], ';');
+            }
+            
+            fclose($file);
+        };
+        
+        return response()->stream($callback, 200, $headers);
     }
 }

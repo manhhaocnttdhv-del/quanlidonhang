@@ -31,10 +31,16 @@
 <!-- Tổng hợp -->
 <div class="row mb-4">
     <div class="col-md-3">
-        <div class="card text-white bg-primary">
+        <div class="card text-white bg-primary" style="cursor: pointer;" onclick="toggleWarehouseDetails()">
             <div class="card-body">
                 <h6 class="card-subtitle mb-2">Tổng số kho</h6>
-                <h3 class="mb-0">{{ $totalStats['total_warehouses'] ?? 0 }}</h3>
+                <h3 class="mb-0">
+                    <a href="javascript:void(0)" class="text-white text-decoration-none" onclick="event.stopPropagation(); toggleWarehouseDetails();">
+                        {{ $totalStats['total_warehouses'] ?? 0 }}
+                        <i class="fas fa-chevron-down ms-2" id="warehouseToggleIcon"></i>
+                    </a>
+                </h3>
+                <small>Click để xem chi tiết</small>
             </div>
         </div>
     </div>
@@ -87,9 +93,10 @@
 </div>
 
 <!-- Chi tiết từng kho -->
-<div class="card">
+<div class="card" id="warehouseDetailsCard" style="display: none;">
     <div class="card-header">
         <h5 class="mb-0"><i class="fas fa-list me-2"></i>Chi tiết từng kho</h5>
+        <small class="text-muted">Tổng: {{ count($warehouseStats ?? []) }} kho</small>
     </div>
     <div class="card-body">
         <div class="table-responsive">
@@ -144,10 +151,21 @@
                             <span class="badge bg-success">{{ $stat['delivered_orders'] }}</span>
                         </td>
                         <td>
-                            <strong class="text-primary">{{ number_format($stat['total_shipping_revenue']) }} đ</strong>
+                            <div>
+                                <strong class="text-primary">VC: {{ number_format($stat['total_shipping_revenue'] ?? 0) }} đ</strong>
+                                @if(($stat['total_return_fee'] ?? 0) > 0)
+                                <br><strong class="text-warning">Trả hàng: {{ number_format($stat['total_return_fee']) }} đ</strong>
+                                @endif
+                                <br><strong class="text-success">Tổng: {{ number_format($stat['total_revenue'] ?? 0) }} đ</strong>
+                            </div>
                         </td>
                         <td>
-                            <strong class="text-danger">{{ number_format($stat['total_cod_amount']) }} đ</strong>
+                            <div>
+                                <strong class="text-danger">COD: {{ number_format($stat['total_cod_amount'] ?? 0) }} đ</strong>
+                                @if(($stat['total_cod_collected'] ?? 0) > 0)
+                                <br><small class="text-success">Đã thu: {{ number_format($stat['total_cod_collected']) }} đ</small>
+                                @endif
+                            </div>
                         </td>
                         <td>
                             <div class="small">
@@ -169,7 +187,7 @@
                             </div>
                         </td>
                         <td>
-                            <a href="{{ route('admin.warehouses.show', $stat['warehouse']->id) }}" class="btn btn-sm btn-primary">
+                            <a href="{{ route('admin.reports.warehouse-orders', $stat['warehouse']->id) }}" class="btn btn-sm btn-primary">
                                 <i class="fas fa-eye"></i> Xem
                             </a>
                         </td>
@@ -184,5 +202,26 @@
         </div>
     </div>
 </div>
+
+<script>
+function toggleWarehouseDetails() {
+    const card = document.getElementById('warehouseDetailsCard');
+    const icon = document.getElementById('warehouseToggleIcon');
+    
+    if (card.style.display === 'none') {
+        card.style.display = 'block';
+        if (icon) {
+            icon.classList.remove('fa-chevron-down');
+            icon.classList.add('fa-chevron-up');
+        }
+    } else {
+        card.style.display = 'none';
+        if (icon) {
+            icon.classList.remove('fa-chevron-up');
+            icon.classList.add('fa-chevron-down');
+        }
+    }
+}
+</script>
 @endsection
 

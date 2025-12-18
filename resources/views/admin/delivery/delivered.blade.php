@@ -101,26 +101,6 @@
                         </thead>
                         <tbody>
                             @forelse($deliveredOrders as $order)
-                            @php
-                                // Tìm kho gửi từ transaction 'out' đầu tiên
-                                $firstOutTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
-                                    ->where('type', 'out')
-                                    ->orderBy('transaction_date', 'asc')
-                                    ->first();
-                                $fromWarehouse = $firstOutTransaction ? \App\Models\Warehouse::find($firstOutTransaction->warehouse_id) : $order->warehouse;
-                                
-                                // Tìm kho nhận từ transaction 'in' với notes "Nhận từ"
-                                $inTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
-                                    ->where('type', 'in')
-                                    ->where(function($q) {
-                                        $q->where('notes', 'like', '%Nhận từ%')
-                                          ->orWhere('notes', 'like', '%từ kho%');
-                                    })
-                                    ->first();
-                                $toWarehouse = $inTransaction ? \App\Models\Warehouse::find($inTransaction->warehouse_id) : null;
-                                
-                                $revenue = ($order->cod_collected ?? $order->cod_amount ?? 0) + ($order->shipping_fee ?? 0);
-                            @endphp
                             <tr>
                                 <td>
                                     <strong>{{ $order->tracking_number }}</strong>
@@ -128,19 +108,19 @@
                                     <small class="text-muted">{{ $order->id }}</small>
                                 </td>
                                 <td>
-                                    @if($fromWarehouse)
-                                        <strong>{{ $fromWarehouse->name }}</strong>
+                                    @if($order->from_warehouse)
+                                        <strong>{{ $order->from_warehouse->name }}</strong>
                                         <br>
-                                        <small class="text-muted">{{ $fromWarehouse->province }}</small>
+                                        <small class="text-muted">{{ $order->from_warehouse->province }}</small>
                                     @else
                                         <span class="text-muted">-</span>
                                     @endif
                                 </td>
                                 <td>
-                                    @if($toWarehouse)
-                                        <strong class="text-success">{{ $toWarehouse->name }}</strong>
+                                    @if($order->to_warehouse_from_transaction)
+                                        <strong class="text-success">{{ $order->to_warehouse_from_transaction->name }}</strong>
                                         <br>
-                                        <small class="text-muted">{{ $toWarehouse->province }}</small>
+                                        <small class="text-muted">{{ $order->to_warehouse_from_transaction->province }}</small>
                                     @else
                                         <span class="text-muted">-</span>
                                     @endif
@@ -176,7 +156,7 @@
                                     {{ number_format($order->shipping_fee ?? 0, 0, ',', '.') }} đ
                                 </td>
                                 <td class="text-end">
-                                    <strong class="text-success">{{ number_format($revenue, 0, ',', '.') }} đ</strong>
+                                    <strong class="text-success">{{ number_format($order->revenue, 0, ',', '.') }} đ</strong>
                                 </td>
                                 <td>
                                     @if($order->delivered_at)

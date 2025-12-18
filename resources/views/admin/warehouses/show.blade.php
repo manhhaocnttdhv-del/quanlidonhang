@@ -53,51 +53,6 @@
     </div>
 </div>
 
-<div class="card mb-4">
-    <div class="card-header">
-        <h5 class="mb-0"><i class="fas fa-inbox me-2"></i>Nhập kho</h5>
-        <small class="text-muted">Nhập đơn hàng từ kho các tỉnh khác gửi về hoặc đơn hàng khác</small>
-    </div>
-    <div class="card-body">
-        <form action="{{ route('admin.warehouses.receive-order') }}" method="POST">
-            @csrf
-            <input type="hidden" name="warehouse_id" value="{{ $warehouse->id }}">
-            <div class="row">
-                <div class="col-md-4">
-                    <div class="mb-3">
-                        <label class="form-label">Mã vận đơn <span class="text-danger">*</span></label>
-                        <input type="text" name="order_id" class="form-control" placeholder="Nhập mã vận đơn hoặc ID" required>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="mb-3">
-                        <label class="form-label">Từ kho (nếu có)</label>
-                        <select name="from_warehouse_id" class="form-select">
-                            <option value="">-- Chọn kho gửi --</option>
-                            @foreach(\App\Models\Warehouse::where('id', '!=', $warehouse->id)->where('is_active', true)->get() as $w)
-                            <option value="{{ $w->id }}">{{ $w->name }} ({{ $w->province }})</option>
-                            @endforeach
-                        </select>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="mb-3">
-                        <label class="form-label">Số phiếu nhập</label>
-                        <input type="text" name="reference_number" class="form-control">
-                    </div>
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Ghi chú</label>
-                <textarea name="notes" class="form-control" rows="2" placeholder="Ví dụ: Nhận từ kho Hà Nội, kho Hồ Chí Minh..."></textarea>
-            </div>
-            <button type="submit" class="btn btn-primary">
-                <i class="fas fa-arrow-down me-2"></i>Nhập kho
-            </button>
-        </form>
-    </div>
-</div>
-
 <!-- Đơn hàng đang đến kho (chưa nhận) -->
 @if(isset($inventory['orders_incoming']) && count($inventory['orders_incoming']) > 0)
 <div class="card mb-4">
@@ -152,14 +107,8 @@
                             @endif
                         </td>
                         <td>
-                            @php
-                                $lastOutTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
-                                    ->where('type', 'out')
-                                    ->orderBy('transaction_date', 'desc')
-                                    ->first();
-                            @endphp
-                            @if($lastOutTransaction)
-                            <small>{{ $lastOutTransaction->transaction_date->format('d/m/Y H:i') }}</small>
+                            @if($order->last_out_transaction ?? null)
+                            <small>{{ $order->last_out_transaction->transaction_date->format('d/m/Y H:i') }}</small>
                             @else
                             <span class="text-muted">N/A</span>
                             @endif
@@ -428,12 +377,7 @@
             <form method="GET" action="{{ route('admin.warehouses.show', $warehouse->id) }}" id="filterProvinceForm1" class="mb-0">
                 <select name="province" id="filterProvince1" class="form-select form-select-sm" onchange="this.form.submit()">
                     <option value="">Tất cả tỉnh/TP</option>
-                    @php
-                        $addressesJson = file_get_contents(public_path('data/vietnam-addresses-full.json'));
-                        $addresses = json_decode($addressesJson, true);
-                        $allProvinces = collect($addresses['provinces'] ?? [])->pluck('name')->sort()->values();
-                    @endphp
-                    @foreach($allProvinces as $province)
+                    @foreach($provinces ?? [] as $province)
                     <option value="{{ $province }}" {{ request('province') == $province ? 'selected' : '' }}>{{ $province }}</option>
                     @endforeach
                 </select>
@@ -446,7 +390,16 @@
     <div class="card-body">
         <div class="alert alert-info mb-3" id="selectionInfoPickup" style="display: none;">
             <i class="fas fa-info-circle me-2"></i>
-            Đã chọn <strong id="selectedCountTextPickup">0</strong> đơn hàng. Chọn tuyến vận chuyển và click "Xuất kho nhiều đơn" để xuất kho hàng loạt.
+            <div>
+                <strong>Đã chọn <span id="selectedCountTextPickup">0</span> đơn hàng.</strong>
+                <div class="mt-2">
+                    <strong>Bước tiếp theo:</strong>
+                    <ul class="mb-0 mt-1">
+                        <li>Nếu người nhận <strong>cùng tỉnh</strong> với kho → Click nút <strong>mũi tên lên (↑)</strong> để chuyển sang trang "Giao hàng" và phân công tài xế shipper</li>
+                        <li>Nếu người nhận <strong>khác tỉnh</strong> → Chọn tuyến vận chuyển và click <strong>"Xuất kho nhiều đơn"</strong> để chuyển đến kho khác</li>
+                    </ul>
+                </div>
+            </div>
         </div>
         <div class="table-responsive">
             <table class="table table-hover" id="inventoryTablePickup">
@@ -496,15 +449,8 @@
                             @endif
                         </td>
                         <td>
-                            @php
-                                $lastTransaction = \App\Models\WarehouseTransaction::where('warehouse_id', $warehouse->id)
-                                    ->where('order_id', $order->id)
-                                    ->where('type', 'in')
-                                    ->orderBy('transaction_date', 'desc')
-                                    ->first();
-                            @endphp
-                            @if($lastTransaction)
-                            <small>{{ $lastTransaction->transaction_date->format('d/m/Y H:i') }}</small>
+                            @if($order->last_in_transaction ?? null)
+                            <small>{{ $order->last_in_transaction->transaction_date->format('d/m/Y H:i') }}</small>
                             @elseif($order->picked_up_at)
                             <small>{{ $order->picked_up_at->format('d/m/Y H:i') }}</small>
                             @else
@@ -513,180 +459,14 @@
                         </td>
                         <td>
                             <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-sm btn-success" onclick="quickRelease({{ $order->id }}, '{{ $order->tracking_number }}')" title="Xuất kho nhanh">
-                                    <i class="fas fa-arrow-up"></i>
-                                </button>
-                                <a href="{{ route('admin.orders.show', $order->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết">
-                                    <i class="fas fa-eye"></i>
-                                </a>
-                            </div>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="10" class="text-center text-muted">
-                            <i class="fas fa-truck me-2"></i>Chưa có đơn hàng nào từ tài xế về kho
-                        </td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<!-- Đơn hàng từ kho khác tới -->
-<div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center bg-info text-white">
-        <div>
-            <h5 class="mb-0"><i class="fas fa-warehouse me-2"></i>Đơn hàng từ kho khác tới</h5>
-            <small>Tổng: {{ count($inventory['orders_from_other_warehouses'] ?? []) }} đơn</small>
-        </div>
-        <div class="d-flex gap-2">
-            <form method="GET" action="{{ route('admin.warehouses.show', $warehouse->id) }}" id="filterProvinceForm2" class="mb-0">
-                <select name="province" id="filterProvince2" class="form-select form-select-sm" onchange="this.form.submit()">
-                    <option value="">Tất cả tỉnh/TP</option>
-                    @php
-                        $addressesJson = file_get_contents(public_path('data/vietnam-addresses-full.json'));
-                        $addresses = json_decode($addressesJson, true);
-                        $allProvinces = collect($addresses['provinces'] ?? [])->pluck('name')->sort()->values();
-                    @endphp
-                    @foreach($allProvinces as $province)
-                    <option value="{{ $province }}" {{ request('province') == $province ? 'selected' : '' }}>{{ $province }}</option>
-                    @endforeach
-                </select>
-            </form>
-            <button type="button" class="btn btn-success btn-sm me-2" id="bulkAssignDriverBtnWarehouse" disabled onclick="openAssignDriverModal('from_warehouse')">
-                <i class="fas fa-user-plus me-1"></i>Phân công tài xế (<span id="selectedCountWarehouse">0</span>)
-            </button>
-            {{-- <button type="button" class="btn btn-light btn-sm" id="bulkReleaseBtnWarehouse" disabled onclick="bulkReleaseOrders()">
-                <i class="fas fa-arrow-up me-1"></i>Xuất kho nhiều đơn (<span id="selectedCountWarehouse">0</span>)
-            </button> --}}
-        </div>
-    </div>
-    <div class="card-body">
-        <div class="alert alert-info mb-3" id="selectionInfoWarehouse" style="display: none;">
-            <i class="fas fa-info-circle me-2"></i>
-            Đã chọn <strong id="selectedCountTextWarehouse">0</strong> đơn hàng. Chọn tuyến vận chuyển và click "Xuất kho nhiều đơn" để xuất kho hàng loạt.
-        </div>
-        <div class="table-responsive">
-            <table class="table table-hover" id="inventoryTableWarehouse">
-                <thead>
-                    <tr>
-                        <th width="50">
-                            <input type="checkbox" id="selectAllOrdersWarehouse" title="Chọn tất cả">
-                        </th>
-                        <th>Mã vận đơn</th>
-                        <th>Kho gửi</th>
-                        <th>Người nhận</th>
-                        <th>Địa chỉ nhận</th>
-                        <th>Tỉnh/TP</th>
-                        <th>Trọng lượng</th>
-                        <th>Tuyến</th>
-                        <th>Ngày nhập kho</th>
-                        <th>Thao tác</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse($inventory['orders_from_other_warehouses'] ?? [] as $order)
-                    <tr>
-                        <td>
-                            <input type="checkbox" class="order-checkbox-warehouse" value="{{ $order->id }}" 
-                                   data-tracking="{{ $order->tracking_number }}"
-                                   data-receiver-province="{{ $order->receiver_province }}"
-                                   data-route-id="{{ $routesFromNgheAn[$order->receiver_province]->id ?? '' }}"
-                                   data-cod-amount="{{ $order->cod_amount ?? 0 }}"
-                                   data-shipping-fee="{{ $order->shipping_fee ?? 0 }}">
-                        </td>
-                        <td><strong>{{ $order->tracking_number }}</strong></td>
-                        <td>
-                            @php
-                                $lastInTransaction = \App\Models\WarehouseTransaction::where('warehouse_id', $warehouse->id)
-                                    ->where('order_id', $order->id)
-                                    ->where('type', 'in')
-                                    ->with('warehouse')
-                                    ->orderBy('transaction_date', 'desc')
-                                    ->first();
-                                $fromWarehouseName = $lastInTransaction && $lastInTransaction->notes ? 
-                                    (preg_match('/từ\s+(.+?)(\s*\(|$)/i', $lastInTransaction->notes, $matches) ? $matches[1] : 'Kho khác') : 
-                                    'Kho khác';
-                            @endphp
-                            <span class="badge bg-info" title="Từ kho khác gửi về">
-                                <i class="fas fa-warehouse me-1"></i>{{ $fromWarehouseName }}
-                            </span>
-                        </td>
-                        <td>{{ $order->receiver_name }}</td>
-                        <td>{{ $order->receiver_address }}</td>
-                        <td><span class="badge bg-info">{{ $order->receiver_province }}</span></td>
-                        <td>{{ $order->weight }} kg</td>
-                        <td>
-                            @if($order->route)
-                            <small>{{ $order->route->name }}</small>
-                            @else
-                            <span class="text-muted">Chưa có</span>
-                            @endif
-                        </td>
-                        <td>
-                            @php
-                                $lastTransaction = \App\Models\WarehouseTransaction::where('warehouse_id', $warehouse->id)
-                                    ->where('order_id', $order->id)
-                                    ->where('type', 'in')
-                                    ->orderBy('transaction_date', 'desc')
-                                    ->first();
-                            @endphp
-                            @if($lastTransaction)
-                            <small>{{ $lastTransaction->transaction_date->format('d/m/Y H:i') }}</small>
-                            @elseif($order->picked_up_at)
-                            <small>{{ $order->picked_up_at->format('d/m/Y H:i') }}</small>
-                            @else
-                            <span class="text-muted">N/A</span>
-                            @endif
-                        </td>
-                        <td>
-                            <div class="btn-group" role="group">
-                                @if($order->status === 'out_for_delivery' && $order->delivery_driver_id)
-                                    {{-- Đơn hàng đã phân công shipper - Hiển thị trạng thái và nút cập nhật --}}
-                                    @if($order->deliveryDriver)
-                                        <span class="badge bg-warning me-1" title="Đang giao hàng - Tài xế: {{ $order->deliveryDriver->name }}">
-                                            <i class="fas fa-truck me-1"></i>{{ $order->deliveryDriver->name }}
-                                        </span>
-                                    @endif
-                                    <button type="button" class="btn btn-sm btn-success" onclick="updateDeliveryStatus({{ $order->id }}, 'delivered')" title="Cập nhật giao hàng thành công">
-                                        <i class="fas fa-check-circle"></i> Thành công
+                                @if($order->is_same_province ?? false)
+                                    {{-- Cùng tỉnh: Chuyển sang trang Giao hàng để phân công shipper --}}
+                                    <button type="button" class="btn btn-sm btn-success" onclick="quickRelease({{ $order->id }}, '{{ $order->tracking_number }}')" title="Chuyển sang trang Giao hàng để phân công tài xế shipper (cùng tỉnh: {{ $warehouse->province }})">
+                                        <i class="fas fa-arrow-up"></i>
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-danger" onclick="updateDeliveryStatus({{ $order->id }}, 'failed')" title="Cập nhật giao hàng thất bại">
-                                        <i class="fas fa-times-circle"></i> Thất bại
-                                    </button>
-                                @elseif($order->status === 'delivered')
-                                    {{-- Đơn hàng đã giao thành công - Hiển thị doanh thu --}}
-                                    <span class="badge bg-success me-1">
-                                        <i class="fas fa-check-circle me-1"></i>Đã giao
-                                    </span>
-                                    @php
-                                        $revenue = ($order->cod_collected ?? $order->cod_amount ?? 0) + ($order->shipping_fee ?? 0);
-                                    @endphp
-                                    <small class="text-success fw-bold">Doanh thu: {{ number_format($revenue, 0, ',', '.') }} đ</small>
-                                @elseif($order->status === 'failed')
-                                    {{-- Đơn hàng giao thất bại --}}
-                                    <span class="badge bg-danger me-1">
-                                        <i class="fas fa-times-circle me-1"></i>Thất bại
-                                    </span>
                                 @else
-                                    {{-- Đơn hàng chưa phân công shipper --}}
-                                    @if(!$order->delivery_driver_id)
-                                        <button type="button" class="btn btn-sm btn-success" onclick="assignDriverToOrder({{ $order->id }})" title="Phân công tài xế">
-                                            <i class="fas fa-user-plus"></i>
-                                        </button>
-                                    @else
-                                        @if($order->deliveryDriver)
-                                            <span class="badge bg-success me-1" title="Tài xế: {{ $order->deliveryDriver->name }}">
-                                                <i class="fas fa-user me-1"></i>{{ $order->deliveryDriver->name }}
-                                            </span>
-                                        @else
-                                            <span class="badge bg-secondary">Đã phân công</span>
-                                        @endif
-                                    @endif
-                                    <button type="button" class="btn btn-sm btn-warning" onclick="quickRelease({{ $order->id }}, '{{ $order->tracking_number }}')" title="Xuất kho nhanh">
+                                    {{-- Khác tỉnh: Cũng chuyển sang trang Giao hàng để phân công tài xế --}}
+                                    <button type="button" class="btn btn-sm btn-warning" onclick="quickRelease({{ $order->id }}, '{{ $order->tracking_number }}')" title="Chuyển sang trang Giao hàng để phân công tài xế (khác tỉnh: {{ $order->receiver_province }})">
                                         <i class="fas fa-arrow-up"></i>
                                     </button>
                                 @endif
@@ -699,7 +479,7 @@
                     @empty
                     <tr>
                         <td colspan="10" class="text-center text-muted">
-                            <i class="fas fa-warehouse me-2"></i>Chưa có đơn hàng nào từ kho khác gửi về
+                            <i class="fas fa-truck me-2"></i>Chưa có đơn hàng nào từ tài xế về kho
                         </td>
                     </tr>
                     @endforelse
@@ -741,13 +521,7 @@
                     <label for="driverSelect" class="form-label">Chọn tài xế shipper:</label>
                     <select class="form-select" id="driverSelect">
                         <option value="">-- Chọn tài xế shipper --</option>
-                        @php
-                            $warehouseDrivers = \App\Models\Driver::where('warehouse_id', $warehouse->id)
-                                ->where('is_active', true)
-                                ->where('driver_type', 'shipper')
-                                ->get();
-                        @endphp
-                        @foreach($warehouseDrivers as $driver)
+                        @foreach($warehouseShippers ?? [] as $driver)
                         <option value="{{ $driver->id }}">{{ $driver->name }} - {{ $driver->phone }}</option>
                         @endforeach
                     </select>
@@ -854,42 +628,169 @@ $(document).ready(function() {
     });
     @endif
     
-    // DataTable cho bảng đơn hàng từ kho khác tới
-    @if(isset($inventory['orders_from_other_warehouses']) && count($inventory['orders_from_other_warehouses']) > 0)
-    $('#inventoryTableWarehouse').DataTable({
-        language: {
-            url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/vi.json'
-        },
-        responsive: true,
-        pageLength: 25,
-        order: [[8, 'desc']]
-    });
-    @endif
     
 });
 
 function quickRelease(orderId, trackingNumber) {
-    // Tìm đơn hàng và tự động chọn tuyến (có thể ở cả 2 bảng)
-    const orderRow = $(`.order-checkbox-pickup[value="${orderId}"], .order-checkbox-warehouse[value="${orderId}"]`).closest('tr');
-    const checkbox = orderRow.find('.order-checkbox-pickup, .order-checkbox-warehouse');
-    const receiverProvince = checkbox.data('receiver-province');
-    const routeId = checkbox.data('route-id');
-    
-    // Tự động chọn tuyến nếu có
-    if (routeId) {
-        $('#releaseOrderForm select[name="route_id"]').val(routeId);
+    // Xuất kho và chuyển sang trang Giao hàng để phân công tài xế shipper (đơn hàng cùng tỉnh)
+    try {
+        console.log('quickRelease called - Xuất kho và chuyển sang trang Giao hàng', { orderId, trackingNumber });
+        
+        // Lấy tất cả đơn hàng đã được chọn từ bảng "Đơn hàng từ tài xế về"
+        const selectedPickup = $('.order-checkbox-pickup:checked').map(function() {
+            return $(this).val();
+        }).get();
+        
+        // Nếu không có đơn nào được chọn, chỉ lấy đơn hàng được click
+        let orderIds = selectedPickup.length > 0 ? selectedPickup : [orderId.toString()];
+        
+        // Đảm bảo đơn hàng được click luôn được bao gồm
+        if (!orderIds.includes(orderId.toString())) {
+            orderIds.push(orderId.toString());
+        }
+        
+        console.log('Order IDs to release:', orderIds);
+        
+        // Lấy thông tin các tỉnh nhận
+        const provinces = [];
+        orderIds.forEach(function(id) {
+            const checkbox = $(`.order-checkbox-pickup[value="${id}"]`);
+            if (checkbox.length > 0) {
+                const province = checkbox.data('receiver-province');
+                if (province && !provinces.includes(province)) {
+                    provinces.push(province);
+                }
+            }
+        });
+        
+        // Hiển thị thông báo xác nhận
+        let confirmMessage = `Xác nhận xuất kho ${orderIds.length} đơn hàng?\n\n`;
+        if (provinces.length > 0) {
+            confirmMessage += `Các tỉnh nhận: ${provinces.join(', ')}\n\n`;
+        }
+        confirmMessage += `Đơn hàng sẽ tự động chuyển sang trang "Giao hàng" để phân công tài xế shipper giao hàng tới tỉnh nhận (cùng tỉnh với kho).`;
+        
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        
+        // Gửi request xuất kho
+        $.ajax({
+            url: '{{ route("admin.warehouses.bulk-release-order") }}',
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                warehouse_id: {{ $warehouse->id }},
+                order_ids: orderIds,
+                route_id: '', // Tự động chọn tuyến
+                reference_number: '',
+                notes: 'Xuất kho để phân công tài xế shipper giao hàng'
+            },
+            success: function(response) {
+                if (typeof showNotification === 'function') {
+                    showNotification('success', response.message || `Đã xuất kho ${orderIds.length} đơn hàng thành công!`);
+                } else {
+                    alert(response.message || `Đã xuất kho ${orderIds.length} đơn hàng thành công!`);
+                }
+                // Chuyển sang trang Giao hàng
+                setTimeout(function() {
+                    window.location.href = '{{ route("admin.delivery.index") }}';
+                }, 1000);
+            },
+            error: function(xhr) {
+                let errorMessage = 'Có lỗi xảy ra khi xuất kho đơn hàng.';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    errorMessage = xhr.responseJSON.message;
+                }
+                if (typeof showNotification === 'function') {
+                    showNotification('error', errorMessage);
+                } else {
+                    alert(errorMessage);
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error in quickRelease:', error);
+        alert('Có lỗi xảy ra khi xuất kho. Vui lòng thử lại.');
     }
-    
-    if (!confirm(`Xác nhận xuất kho đơn hàng ${trackingNumber}?\n\nĐơn hàng sẽ chuyển sang trang "Giao hàng" để phân công tài xế giao đến người nhận.`)) {
+}
+
+function quickReleaseToOtherWarehouse(orderId, trackingNumber) {
+    // Xuất kho để chuyển đến kho khác (đơn hàng khác tỉnh)
+    try {
+        console.log('quickReleaseToOtherWarehouse called - Xuất kho chuyển đến kho khác', { orderId, trackingNumber });
+        // Tìm checkbox và tự động chọn tuyến
+        const checkbox = $(`.order-checkbox-pickup[value="${orderId}"]`);
+        if (checkbox.length === 0) {
+            alert('Không tìm thấy đơn hàng trong danh sách.');
+            return;
+        }
+        
+        const receiverProvince = checkbox.data('receiver-province');
+        const routeId = checkbox.data('route-id');
+        
+        // Bỏ chọn tất cả, chỉ chọn đơn hàng này
+        $('.order-checkbox-pickup').prop('checked', false);
+        checkbox.prop('checked', true);
+        
+        // Cập nhật số lượng đã chọn
+        if (typeof updateSelectedCount === 'function') {
+            updateSelectedCount();
+        }
+        
+        // Cập nhật số lượng trong modal
+        const selected = [orderId];
+        $('#bulkOrderIdsModal').val(JSON.stringify(selected));
+        $('#bulkModalSelectedCount').text(selected.length);
+        
+        // Tự động chọn tuyến nếu có
+        if (routeId) {
+            $('#bulkRouteIdModal').val(routeId);
+        }
+        
+        // Mở modal xuất kho nhiều đơn
+        const modal = $('#bulkReleaseModal');
+        if (modal.length === 0) {
+            alert('Không tìm thấy modal xuất kho. Vui lòng tải lại trang.');
+            return;
+        }
+        
+        // Sử dụng Bootstrap 5 modal API
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            const bsModal = new bootstrap.Modal(modal[0]);
+            bsModal.show();
+        } else {
+            // Fallback cho Bootstrap 4 hoặc jQuery
+            modal.modal('show');
+        }
+        
+        console.log('Modal xuất kho đã mở');
+    } catch (error) {
+        console.error('Error in quickReleaseToOtherWarehouse:', error);
+        alert('Có lỗi xảy ra khi mở modal xuất kho. Vui lòng thử lại.');
+    }
+}
+
+// Đảm bảo jQuery và Bootstrap đã sẵn sàng
+$(document).ready(function() {
+    // Kiểm tra jQuery và Bootstrap
+    if (typeof $ === 'undefined') {
+        console.error('jQuery is not loaded');
         return;
     }
     
-    $('#releaseOrderId').val(orderId);
-    $('#releaseOrderForm').submit();
-}
-
-// Xử lý chọn nhiều đơn hàng - Đơn hàng từ tài xế về
-$(document).ready(function() {
+    if (typeof $.fn.modal === 'undefined') {
+        console.error('Bootstrap modal is not loaded');
+        return;
+    }
+    
+    console.log('Warehouse page JavaScript initialized');
+    
+    // Đảm bảo tất cả nút quickRelease có thể click được
+    $(document).on('click', '[onclick*="quickRelease"]', function(e) {
+        console.log('Quick release button clicked via event delegation');
+    });
+    
     $('#selectAllOrdersPickup').on('change', function() {
         $('.order-checkbox-pickup').prop('checked', this.checked);
         updateSelectedCount();
@@ -902,47 +803,26 @@ $(document).ready(function() {
         $('#selectAllOrdersPickup').prop('checked', total === checked && total > 0);
     });
     
-    // Xử lý chọn nhiều đơn hàng - Đơn hàng từ kho khác tới
-    $('#selectAllOrdersWarehouse').on('change', function() {
-        $('.order-checkbox-warehouse').prop('checked', this.checked);
-        updateSelectedCount();
-    });
-    
-    $('.order-checkbox-warehouse').on('change', function() {
-        updateSelectedCount();
-        const total = $('.order-checkbox-warehouse').length;
-        const checked = $('.order-checkbox-warehouse:checked').length;
-        $('#selectAllOrdersWarehouse').prop('checked', total === checked && total > 0);
-    });
     
     function updateSelectedCount() {
-        // Gộp tất cả đơn hàng đã chọn từ cả 2 bảng
+        // Lấy đơn hàng đã chọn từ bảng "Đơn hàng từ tài xế về"
         const selectedPickup = $('.order-checkbox-pickup:checked').map(function() {
             return $(this).val();
         }).get();
         
-        const selectedWarehouse = $('.order-checkbox-warehouse:checked').map(function() {
-            return $(this).val();
-        }).get();
+        const count = selectedPickup.length;
         
-        const selected = [...selectedPickup, ...selectedWarehouse];
-        const count = selected.length;
-        const countPickup = selectedPickup.length;
-        const countWarehouse = selectedWarehouse.length;
-        
-        // Cập nhật số lượng cho từng phần
-        $('#selectedCountPickup').text(countPickup);
-        $('#selectedCountTextPickup').text(countPickup);
-        $('#selectedCountWarehouse').text(countWarehouse);
-        $('#selectedCountTextWarehouse').text(countWarehouse);
+        // Cập nhật số lượng
+        $('#selectedCountPickup').text(count);
+        $('#selectedCountTextPickup').text(count);
         
         // Gộp tất cả vào một mảng để gửi xuất kho
-        $('#bulkOrderIds').val(JSON.stringify(selected));
+        $('#bulkOrderIds').val(JSON.stringify(selectedPickup));
         $('#bulkSelectedCount').text(count);
         
         // Tự động chọn tuyến vận chuyển
         if (count > 0) {
-            const allChecked = $('.order-checkbox-pickup:checked, .order-checkbox-warehouse:checked');
+            const allChecked = $('.order-checkbox-pickup:checked');
             const receiverProvinces = allChecked.map(function() {
                 return $(this).data('receiver-province');
             }).get();
@@ -999,34 +879,80 @@ $(document).ready(function() {
 
 // Mở modal phân công tài xế
 function openAssignDriverModal(section) {
-    const selected = [];
-    if (section === 'from_warehouse') {
-        $('.order-checkbox-warehouse:checked').each(function() {
+    try {
+        console.log('openAssignDriverModal called', { section });
+        const selected = [];
+        // Chỉ lấy từ đơn hàng từ tài xế về
+        $('.order-checkbox-pickup:checked').each(function() {
             selected.push($(this).val());
         });
+        
+        console.log('Selected orders', selected);
+        
+        if (selected.length === 0) {
+            alert('Vui lòng chọn ít nhất một đơn hàng để phân công tài xế.');
+            return;
+        }
+        
+        // Kiểm tra modal có tồn tại không
+        const modal = $('#assignDriverModal');
+        if (modal.length === 0) {
+            alert('Không tìm thấy modal phân công tài xế. Vui lòng tải lại trang.');
+            console.error('Modal not found');
+            return;
+        }
+        
+        // Sử dụng Bootstrap 5 modal API
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            const bsModal = new bootstrap.Modal(modal[0]);
+            bsModal.show();
+        } else {
+            // Fallback cho Bootstrap 4 hoặc jQuery
+            modal.modal('show');
+        }
+        console.log('Modal shown');
+    } catch (error) {
+        console.error('Error in openAssignDriverModal:', error);
+        alert('Có lỗi xảy ra khi mở modal. Vui lòng thử lại.');
     }
-    
-    if (selected.length === 0) {
-        alert('Vui lòng chọn ít nhất một đơn hàng để phân công tài xế.');
-        return;
-    }
-    
-    $('#assignDriverModal').modal('show');
 }
 
 // Phân công tài xế cho một đơn hàng
 function assignDriverToOrder(orderId) {
-    // Mở modal với 1 đơn hàng
-    $('.order-checkbox-warehouse').prop('checked', false);
-    $('.order-checkbox-warehouse[value="' + orderId + '"]').prop('checked', true);
-    updateSelectedCount();
-    openAssignDriverModal('from_warehouse');
+    try {
+        console.log('assignDriverToOrder called', { orderId });
+        // Tìm checkbox của đơn hàng từ tài xế về
+        const checkboxPickup = $(`.order-checkbox-pickup[value="${orderId}"]`);
+        
+        console.log('Found checkbox', { 
+            pickup: checkboxPickup.length 
+        });
+        
+        // Bỏ chọn tất cả
+        $('.order-checkbox-pickup').prop('checked', false);
+        
+        // Chọn checkbox tương ứng
+        if (checkboxPickup.length > 0) {
+            checkboxPickup.prop('checked', true);
+            if (typeof updateSelectedCount === 'function') {
+                updateSelectedCount();
+            }
+            openAssignDriverModal('from_pickup');
+        } else {
+            alert('Không tìm thấy đơn hàng trong danh sách. Vui lòng thử lại.');
+            console.error('Order not found in checkboxes', { orderId });
+        }
+    } catch (error) {
+        console.error('Error in assignDriverToOrder:', error);
+        alert('Có lỗi xảy ra khi phân công tài xế. Vui lòng thử lại.');
+    }
 }
 
 // Xác nhận phân công tài xế
 function confirmAssignDriver() {
     const selected = [];
-    $('.order-checkbox-warehouse:checked').each(function() {
+    // Lấy từ đơn hàng từ tài xế về
+    $('.order-checkbox-pickup:checked').each(function() {
         selected.push($(this).val());
     });
     
@@ -1079,16 +1005,10 @@ function confirmAssignDriver() {
 }
 
 function bulkReleaseOrders() {
-    // Gộp tất cả đơn hàng đã chọn từ cả 2 bảng
-    const selectedPickup = $('.order-checkbox-pickup:checked').map(function() {
+    // Lấy đơn hàng đã chọn từ bảng "Đơn hàng từ tài xế về"
+    const selected = $('.order-checkbox-pickup:checked').map(function() {
         return $(this).val();
     }).get();
-    
-    const selectedWarehouse = $('.order-checkbox-warehouse:checked').map(function() {
-        return $(this).val();
-    }).get();
-    
-    const selected = [...selectedPickup, ...selectedWarehouse];
     
     if (selected.length === 0) {
         alert('Vui lòng chọn ít nhất một đơn hàng để xuất kho.');
@@ -1097,7 +1017,7 @@ function bulkReleaseOrders() {
     
     // Lấy thông tin các tỉnh nhận của đơn hàng đã chọn
     const provinces = [];
-    $('.order-checkbox-pickup:checked, .order-checkbox-warehouse:checked').each(function() {
+    $('.order-checkbox-pickup:checked').each(function() {
         const province = $(this).data('receiver-province');
         if (province && !provinces.includes(province)) {
             provinces.push(province);
@@ -1145,7 +1065,7 @@ function updateDeliveryStatus(orderId, status) {
     
     if (status === 'delivered') {
         // Lấy thông tin đơn hàng từ data attributes
-        const orderCheckbox = $(`input[value="${orderId}"].order-checkbox-warehouse`);
+        const orderCheckbox = $(`input[value="${orderId}"].order-checkbox-pickup`);
         const codAmount = parseFloat(orderCheckbox.data('cod-amount') || 0);
         const currentShippingFee = parseFloat(orderCheckbox.data('shipping-fee') || 0);
         

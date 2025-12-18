@@ -16,7 +16,16 @@ class OrderController extends Controller
     public function index(Request $request)
     {
         $user = auth()->user();
-        $query = Order::with(['customer', 'pickupDriver', 'deliveryDriver', 'route', 'warehouse']);
+        $query = Order::with([
+            'customer', 
+            'pickupDriver', 
+            'deliveryDriver', 
+            'route', 
+            'warehouse',
+            'statuses' => function($q) {
+                $q->orderBy('created_at', 'desc');
+            }
+        ]);
 
         // Warehouse admin chỉ xem đơn hàng liên quan đến kho của mình
         if ($user->isWarehouseAdmin() && $user->warehouse_id) {
@@ -496,6 +505,104 @@ class OrderController extends Controller
         }
 
         return redirect()->back()->with('success', 'Trạng thái đơn hàng đã được cập nhật');
+    }
+
+    public function cancelOrder(Request $request, string $id)
+    {
+        $order = Order::findOrFail($id);
+
+        if (in_array($order->status, ['delivered', 'cancelled'])) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Không thể hủy đơn hàng đã giao hoặc đã hủy'], 400);
+            }
+            return redirect()->back()->with('error', 'Không thể hủy đơn hàng đã giao hoặc đã hủy');
+        }
+
+        $validated = $request->validate([
+            'cancellation_reason' => 'required|string|max:500',
+            'notes' => 'nullable|string',
+        ]);
+
+        $previousWarehouseId = null;
+
+        if ($order->previous_warehouse_id) {
+            $previousWarehouseId = $order->previous_warehouse_id;
+        } elseif ($order->warehouse_id) {
+            $firstOutTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
+                ->where('type', 'out')
+                ->orderBy('transaction_date', 'asc')
+                ->first();
+            
+            if ($firstOutTransaction) {
+                $previousWarehouseId = $firstOutTransaction->warehouse_id;
+            } else {
+                $previousWarehouseId = $order->warehouse_id;
+            }
+        } else {
+            $lastInTransaction = \App\Models\WarehouseTransaction::where('order_id', $order->id)
+                ->where('type', 'in')
+                ->orderBy('transaction_date', 'desc')
+                ->first();
+            
+            if ($lastInTransaction) {
+                $previousWarehouseId = $lastInTransaction->warehouse_id;
+            }
+        }
+
+        if (!$previousWarehouseId) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Không xác định được kho cũ để quay lại'], 400);
+            }
+            return redirect()->back()->with('error', 'Không xác định được kho cũ để quay lại');
+        }
+
+        $previousWarehouse = \App\Models\Warehouse::find($previousWarehouseId);
+        if (!$previousWarehouse) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Kho cũ không tồn tại'], 400);
+            }
+            return redirect()->back()->with('error', 'Kho cũ không tồn tại');
+        }
+
+        $notes = $validated['notes'] ?? "Hủy đơn hàng - Lý do: {$validated['cancellation_reason']} - Quay lại kho {$previousWarehouse->name}";
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($order, $previousWarehouseId, $notes, $validated, $previousWarehouse) {
+            $order->update([
+                'status' => 'cancelled',
+                'warehouse_id' => $previousWarehouseId,
+                'previous_warehouse_id' => null,
+                'to_warehouse_id' => null,
+                'delivery_driver_id' => null,
+                'pickup_driver_id' => null,
+                'failure_reason' => $validated['cancellation_reason'],
+            ]);
+
+            OrderStatus::create([
+                'order_id' => $order->id,
+                'status' => 'cancelled',
+                'notes' => $notes,
+                'warehouse_id' => $previousWarehouseId,
+                'updated_by' => auth()->id(),
+            ]);
+
+            \App\Models\WarehouseTransaction::create([
+                'warehouse_id' => $previousWarehouseId,
+                'order_id' => $order->id,
+                'type' => 'in',
+                'notes' => "Đơn hàng bị hủy - Quay lại kho {$previousWarehouse->name}",
+                'transaction_date' => now(),
+                'created_by' => auth()->id(),
+            ]);
+        });
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'Đơn hàng đã được hủy và quay lại kho cũ',
+                'data' => $order->fresh(),
+            ]);
+        }
+
+        return redirect()->back()->with('success', 'Đơn hàng đã được hủy và quay lại kho cũ');
     }
 
     /**

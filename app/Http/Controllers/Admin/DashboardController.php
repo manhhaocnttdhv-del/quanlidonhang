@@ -42,7 +42,11 @@ class DashboardController extends Controller
         ];
         
         $recentOrders = $recentOrdersQuery->orderBy('created_at', 'desc')->limit(10)->get();
-        
-        return view('admin.dashboard', compact('stats', 'recentOrders'));
+        if($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $warehouse = \App\Models\Warehouse::findOrFail($user->warehouse_id);
+            return redirect()->route('admin.reports.index', $warehouse->id);
+        }else{
+            return view('admin.reports.warehouses-overview', compact('stats', 'recentOrders'));
+        }
     }
 }

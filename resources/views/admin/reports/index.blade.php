@@ -23,7 +23,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    {{-- <div class="col-md-3">
         <div class="card text-white bg-warning">
             <div class="card-body">
                 <h6 class="card-subtitle mb-2">Thất bại</h6>
@@ -31,7 +31,7 @@
                 <small>Hôm nay</small>
             </div>
         </div>
-    </div>
+    </div> --}}
     <div class="col-md-3">
         <div class="card text-white bg-info">
             <div class="card-body">
@@ -102,39 +102,67 @@
                         <th>Phí VC</th>
                         <th>Tổng COD</th>
                         <th>Tổng (Doanh thu + COD chưa thu)</th>
+                        <th>Thao tác</th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse($reportData ?? [] as $row)
                     <tr>
-                        <td>{{ $row->date ?? $row->created_at ?? 'N/A' }}</td>
-                        <td>{{ $row->order_count ?? $row->total_orders ?? 0 }}</td>
-                        <td>{{ $row->delivered_orders ?? 0 }}</td>
-                        <td>{{ $row->failed_orders ?? 0 }}</td>
                         <td>
-                            <strong class="text-success">{{ number_format($row->total_revenue ?? 0) }} đ</strong>
+                            @php
+                                $dateFormatted = $row['date'] ?? 'N/A';
+                                if ($dateFormatted !== 'N/A' && $dateFormatted) {
+                                    try {
+                                        $dateFormatted = \Carbon\Carbon::parse($dateFormatted)->format('d/m/Y');
+                                    } catch (\Exception $e) {
+                                        $dateFormatted = $row['date'] ?? 'N/A';
+                                    }
+                                }
+                            @endphp
+                            <strong>{{ $dateFormatted }}</strong>
+                        </td>
+                        <td>
+                            <strong>{{ $row['total_orders'] ?? 0 }}</strong>
+                        </td>
+                        <td>
+                            <strong class="text-success">{{ $row['delivered_orders'] ?? 0 }}</strong>
+                        </td>
+                        <td>
+                            <strong class="text-danger">{{ $row['failed_orders'] ?? 0 }}</strong>
+                        </td>
+                        <td>
+                            <strong class="text-success">{{ number_format($row['total_revenue'] ?? 0) }} đ</strong>
                             <br><small class="text-muted">COD đã thu + Phí VC</small>
                         </td>
                         <td>
-                            <strong>{{ number_format($row->cod_collected ?? 0) }} đ</strong>
+                            <strong>{{ number_format($row['cod_collected'] ?? 0) }} đ</strong>
                             <br><small class="text-muted">COD đã thu</small>
                         </td>
                         <td>
-                            <strong>{{ number_format($row->shipping_fee ?? 0) }} đ</strong>
+                            <strong>{{ number_format($row['shipping_fee'] ?? 0) }} đ</strong>
                             <br><small class="text-muted">Phí vận chuyển</small>
                         </td>
                         <td>
-                            <strong>{{ number_format($row->cod_amount ?? 0) }} đ</strong>
+                            <strong>{{ number_format($row['cod_amount'] ?? 0) }} đ</strong>
                             <br><small class="text-muted">COD cần thu</small>
                         </td>
                         <td>
-                            <strong class="text-info">{{ number_format(($row->total_revenue ?? 0) + (($row->cod_amount ?? 0) - ($row->cod_collected ?? 0))) }} đ</strong>
+                            <strong class="text-info">{{ number_format(($row['total_revenue'] ?? 0) + (($row['cod_amount'] ?? 0) - ($row['cod_collected'] ?? 0))) }} đ</strong>
                             <br><small class="text-muted">Tổng cộng</small>
+                        </td>
+                        <td>
+                            @if(($row['total_orders'] ?? 0) > 0)
+                            <a href="{{ route('admin.reports.detail', ['date' => $row['date'], 'type' => 'all']) }}" class="btn btn-sm btn-primary" title="Xem chi tiết tất cả đơn hàng trong ngày">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                            @else
+                            <span class="text-muted">-</span>
+                            @endif
                         </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="8" class="text-center">Không có dữ liệu</td>
+                        <td colspan="10" class="text-center">Không có dữ liệu</td>
                     </tr>
                     @endforelse
                 </tbody>

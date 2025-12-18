@@ -33,12 +33,14 @@ class Order extends Model
         'cod_amount',
         'cod_collected',
         'shipping_fee',
+        'return_fee',
         'service_type',
         'status',
         'pickup_driver_id',
         'delivery_driver_id',
         'route_id',
         'warehouse_id',
+        'previous_warehouse_id',
         'to_warehouse_id',
         'pickup_scheduled_at',
         'picked_up_at',
@@ -59,6 +61,7 @@ class Order extends Model
         'cod_amount' => 'decimal:2',
         'cod_collected' => 'decimal:2',
         'shipping_fee' => 'decimal:2',
+        'return_fee' => 'decimal:2',
         'is_fragile' => 'boolean',
         'pickup_scheduled_at' => 'datetime',
         'picked_up_at' => 'datetime',
@@ -96,6 +99,11 @@ class Order extends Model
         return $this->belongsTo(Warehouse::class, 'to_warehouse_id');
     }
 
+    public function previousWarehouse()
+    {
+        return $this->belongsTo(Warehouse::class, 'previous_warehouse_id');
+    }
+
     public function statuses()
     {
         return $this->hasMany(OrderStatus::class);
@@ -121,5 +129,53 @@ class Order extends Model
         return $this->belongsToMany(CodReconciliation::class, 'cod_reconciliation_orders')
             ->withPivot('cod_amount', 'shipping_fee')
             ->withTimestamps();
+    }
+
+    public function getFromWarehouseAttribute()
+    {
+        if ($this->previous_warehouse_id) {
+            return $this->previousWarehouse;
+        }
+
+        $firstOutTransaction = $this->warehouseTransactions
+            ->where('type', 'out')
+            ->sortBy('transaction_date')
+            ->first();
+
+        if ($firstOutTransaction) {
+            return Warehouse::find($firstOutTransaction->warehouse_id);
+        }
+
+        return $this->warehouse;
+    }
+
+    public function getToWarehouseFromTransactionAttribute()
+    {
+        $inTransaction = $this->warehouseTransactions
+            ->where('type', 'in')
+            ->filter(function($transaction) {
+                return str_contains($transaction->notes ?? '', 'Nhận từ') 
+                    || str_contains($transaction->notes ?? '', 'từ kho');
+            })
+            ->first();
+
+        if ($inTransaction) {
+            return Warehouse::find($inTransaction->warehouse_id);
+        }
+
+        return null;
+    }
+
+    public function getLastOutTransactionAttribute()
+    {
+        return $this->warehouseTransactions
+            ->where('type', 'out')
+            ->sortByDesc('transaction_date')
+            ->first();
+    }
+
+    public function getRevenueAttribute()
+    {
+        return ($this->cod_collected ?? $this->cod_amount ?? 0) + ($this->shipping_fee ?? 0);
     }
 }

@@ -53,7 +53,7 @@
                                     data-customer-address="{{ $customer->address }}">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            @if(($customer->orders_count ?? 0) == 0)
+                            @if((int)($customer->orders_count ?? 0) === 0)
                             <form action="{{ route('admin.customers.destroy', $customer->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa khách hàng này?');">
                                 @csrf
                                 @method('DELETE')

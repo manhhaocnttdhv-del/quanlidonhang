@@ -54,6 +54,7 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     Route::get('/orders/{id}/edit', [OrderController::class, 'edit'])->name('orders.edit');
     Route::put('/orders/{id}', [OrderController::class, 'update'])->name('orders.update');
     Route::post('/orders/{id}/update-status', [OrderController::class, 'updateStatus'])->name('orders.update-status');
+    Route::post('/orders/{id}/cancel', [OrderController::class, 'cancelOrder'])->name('orders.cancel');
     
     // Dispatch
     Route::get('/dispatch', [DispatchController::class, 'index'])->name('dispatch.index');
@@ -74,17 +75,21 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     Route::post('/warehouses/release-order', [WarehouseController::class, 'releaseOrder'])->name('warehouses.release-order');
     Route::post('/warehouses/ship-to-warehouse', [WarehouseController::class, 'shipToWarehouse'])->name('warehouses.ship-to-warehouse');
     Route::post('/warehouses/bulk-release-order', [WarehouseController::class, 'bulkReleaseOrder'])->name('warehouses.bulk-release-order');
+    Route::post('/warehouses/reship-order', [WarehouseController::class, 'reshipOrder'])->name('warehouses.reship-order');
     
     // Users (chỉ super admin)
     Route::resource('users', \App\Http\Controllers\Admin\UserController::class)->except(['destroy']);
     Route::delete('/users/{id}', [\App\Http\Controllers\Admin\UserController::class, 'destroy'])->name('users.destroy');
     
     // Delivery
+    Route::post('/delivery/assign-return-shipper/{id}', [DeliveryController::class, 'assignReturnShipper'])->name('delivery.assign-return-shipper');
     Route::get('/delivery', [DeliveryController::class, 'index'])->name('delivery.index');
     Route::get('/delivery/delivered', [DeliveryController::class, 'deliveredOrders'])->name('delivery.delivered');
     Route::post('/delivery/assign-driver/{id}', [DeliveryController::class, 'assignDeliveryDriver'])->name('delivery.assign-driver');
     Route::post('/delivery/bulk-assign-driver', [DeliveryController::class, 'bulkAssignDeliveryDriver'])->name('delivery.bulk-assign-driver');
     Route::post('/delivery/update-status/{id}', [DeliveryController::class, 'updateDeliveryStatus'])->name('delivery.update-status');
+    Route::post('/delivery/return-to-warehouse/{id}', [DeliveryController::class, 'returnToWarehouse'])->name('delivery.return-to-warehouse');
+    Route::post('/delivery/reship-to-shipper', [DeliveryController::class, 'reshipToShipper'])->name('delivery.reship-to-shipper');
     
     // Tracking
     Route::get('/tracking', [TrackingController::class, 'index'])->name('tracking.index');
@@ -97,7 +102,10 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     
     // Reports
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('/reports/detail', [ReportController::class, 'detail'])->name('reports.detail');
+    Route::get('/reports/warehouse/{warehouseId}/orders', [ReportController::class, 'warehouseOrders'])->name('reports.warehouse-orders');
     Route::get('/reports/warehouses-overview', [ReportController::class, 'warehousesOverview'])->name('reports.warehouses-overview');
+    Route::get('/reports/export-csv', [ReportController::class, 'exportCSV'])->name('reports.export-csv');
     
     // COD Reconciliations
     Route::get('/cod-reconciliations', [CodReconciliationController::class, 'index'])->name('cod-reconciliations.index');
@@ -139,6 +147,8 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     })->name('api.provinces');
     
     // Get warehouses by province
+    Route::get('/api/shippers', [DeliveryController::class, 'getShippers'])->name('api.shippers');
+    
     Route::get('/api/warehouses', function (\Illuminate\Http\Request $request) {
         $province = $request->get('province');
         

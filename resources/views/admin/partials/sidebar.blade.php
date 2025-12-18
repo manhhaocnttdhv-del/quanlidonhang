@@ -10,7 +10,7 @@
             <i class="fas fa-truck-fast me-2"></i>
             SmartPost
         </h4>
-        <small class="text-muted">
+        <small class="text-muted text-white-50">
             @if($isSuperAdmin)
                 Admin Tổng
             @elseif($isWarehouseAdmin)
@@ -22,10 +22,10 @@
     </div>
     
     <nav class="nav flex-column">
-        <a class="nav-link {{ request()->routeIs('admin.dashboard') ? 'active' : '' }}" href="{{ route('admin.dashboard') }}">
+        {{-- <a class="nav-link {{ request()->routeIs('admin.dashboard') ? 'active' : '' }}" href="{{ route('admin.dashboard') }}">
             <i class="fas fa-home"></i>
             Dashboard
-        </a>
+        </a> --}}
         
         @if($isSuperAdmin)
         {{-- ===== MENU CHO SUPER ADMIN (ADMIN TỔNG) ===== --}}
@@ -48,7 +48,7 @@
         
         @elseif($isWarehouseAdmin)
         {{-- ===== MENU CHO WAREHOUSE ADMIN (ADMIN KHO) ===== --}}
-        <hr class="text-white-50 my-2">
+        <hr class="text-white-50 my-2">s
         
         <a class="nav-link {{ request()->routeIs('admin.customers.*') ? 'active' : '' }}" href="{{ route('admin.customers.index') }}">
             <i class="fas fa-users"></i>
