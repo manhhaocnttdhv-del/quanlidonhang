@@ -16,10 +16,15 @@
                 <div class="col-md-6">
                     <h6 class="border-bottom pb-2 mb-3">Thông tin người gửi</h6>
                     <div class="mb-3 position-relative">
-                        <label class="form-label">Chọn khách hàng (người gửi)</label>
-                        <div class="input-group">
-                            <input type="text" id="customer_search" class="form-control" placeholder="Tìm kiếm khách hàng..." autocomplete="off">
-                            <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addCustomerModal">
+                        <label class="form-label fw-bold">
+                            <i class="fas fa-user me-2 text-primary"></i>Chọn khách hàng (người gửi)
+                        </label>
+                        <div class="input-group input-group-lg shadow-sm">
+                            <span class="input-group-text bg-white border-end-0">
+                                <i class="fas fa-search text-muted"></i>
+                            </span>
+                            <input type="text" id="customer_search" class="form-control border-start-0 border-end-0" placeholder="Nhập tên, số điện thoại hoặc mã khách hàng..." autocomplete="off">
+                            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCustomerModal">
                                 <i class="fas fa-plus me-1"></i>Thêm mới
                             </button>
                         </div>
@@ -40,8 +45,14 @@
                             </option>
                             @endforeach
                         </select>
-                        <div id="customer_results" class="list-group border rounded mt-1" style="display: none; max-height: 200px; overflow-y: auto; position: absolute; z-index: 1000; width: 100%; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"></div>
-                        <small class="text-muted d-block mt-2">Tìm kiếm hoặc thêm khách hàng mới. Nếu không chọn, có thể nhập thủ công bên dưới.</small>
+                        <div id="customer_results" class="customer-search-results"></div>
+                        <div id="customer_loading" class="customer-loading" style="display: none;">
+                            <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                            <small class="text-muted">Đang tìm kiếm...</small>
+                        </div>
+                        <small class="text-muted d-block mt-2">
+                            <i class="fas fa-info-circle me-1"></i>Tìm kiếm hoặc thêm khách hàng mới. Nếu không chọn, có thể nhập thủ công bên dưới.
+                        </small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Tên người gửi <span class="text-danger">*</span></label>
@@ -253,6 +264,150 @@
 </div>
 @endsection
 
+@push('styles')
+<style>
+    /* Modern Customer Search Styles */
+    .customer-search-results {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin-top: 4px;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        max-height: 300px;
+        overflow-y: auto;
+        z-index: 1000;
+        display: none;
+        animation: slideDown 0.2s ease-out;
+    }
+    
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    .customer-search-results .customer-item {
+        padding: 12px 16px;
+        border-bottom: 1px solid #f3f4f6;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .customer-search-results .customer-item:last-child {
+        border-bottom: none;
+    }
+    
+    .customer-search-results .customer-item:hover {
+        background-color: #f9fafb;
+        transform: translateX(4px);
+    }
+    
+    .customer-search-results .customer-item.active {
+        background-color: #eff6ff;
+        border-left: 3px solid #3b82f6;
+    }
+    
+    .customer-search-results .customer-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        flex-shrink: 0;
+        font-size: 0.875rem;
+    }
+    
+    .customer-search-results .customer-info {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .customer-search-results .customer-info h6 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #111827;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .customer-search-results .customer-info .customer-meta {
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 4px;
+    }
+    
+    .customer-search-results .customer-info .customer-meta i {
+        width: 16px;
+        margin-right: 4px;
+    }
+    
+    .customer-search-results .customer-badge {
+        background: #f3f4f6;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #374151;
+        flex-shrink: 0;
+    }
+    
+    .customer-search-results .no-results {
+        padding: 24px;
+        text-align: center;
+        color: #9ca3af;
+    }
+    
+    .customer-search-results .no-results i {
+        font-size: 2rem;
+        margin-bottom: 8px;
+        display: block;
+    }
+    
+    .customer-loading {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        margin-top: 8px;
+        padding: 8px 12px;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+    }
+    
+    #customer_search:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    .input-group-lg .form-control {
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+    }
+</style>
+@endpush
+
 @push('scripts')
 <script>
 $(document).ready(function() {
@@ -429,49 +584,129 @@ $(document).ready(function() {
     
     let selectedCustomerId = null;
     
-    // Search customers
+    // Search customers with modern UI
+    let searchTimeout;
     $('#customer_search').on('input', function() {
-        const searchTerm = $(this).val().toLowerCase();
+        const searchTerm = $(this).val().trim();
         const results = $('#customer_results');
+        const loading = $('#customer_loading');
+        
+        clearTimeout(searchTimeout);
         
         if (searchTerm.length < 2) {
             results.hide().empty();
+            loading.hide();
             return;
         }
         
-        const filtered = customers.filter(c => 
-            c.name.toLowerCase().includes(searchTerm) ||
-            c.phone.includes(searchTerm) ||
-            c.code.toLowerCase().includes(searchTerm)
-        );
+        // Show loading
+        loading.show();
+        results.hide();
         
-        if (filtered.length > 0) {
-            let html = '';
-            filtered.forEach(customer => {
-                html += `
-                    <a href="#" class="list-group-item list-group-item-action" data-id="${customer.id}">
-                        <div class="d-flex w-100 justify-content-between">
-                            <h6 class="mb-1">${customer.name}</h6>
-                            <small>${customer.code}</small>
-                        </div>
-                        <p class="mb-1"><i class="fas fa-phone me-1"></i>${customer.phone}</p>
-                        ${customer.address ? `<small>${customer.address}</small>` : ''}
-                    </a>
-                `;
+        // Simulate search delay for better UX
+        searchTimeout = setTimeout(() => {
+            const filtered = customers.filter(c => {
+                const nameMatch = c.name.toLowerCase().includes(searchTerm.toLowerCase());
+                const phoneMatch = c.phone.includes(searchTerm);
+                const codeMatch = c.code.toLowerCase().includes(searchTerm.toLowerCase());
+                return nameMatch || phoneMatch || codeMatch;
             });
-            results.html(html).show();
-        } else {
-            results.html('<div class="list-group-item text-muted">Không tìm thấy khách hàng</div>').show();
+            
+            loading.hide();
+            
+            if (filtered.length > 0) {
+                let html = '';
+                filtered.slice(0, 10).forEach(customer => {
+                    const initials = customer.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                    const highlightedName = highlightText(customer.name, searchTerm);
+                    const highlightedPhone = highlightText(customer.phone, searchTerm);
+                    
+                    html += `
+                        <div class="customer-item" data-id="${customer.id}">
+                            <div class="customer-avatar">${initials}</div>
+                            <div class="customer-info">
+                                <h6>${highlightedName}</h6>
+                                <div class="customer-meta">
+                                    <span><i class="fas fa-phone"></i>${highlightedPhone}</span>
+                                    ${customer.address ? `<span class="ms-3"><i class="fas fa-map-marker-alt"></i>${customer.address}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="customer-badge">${customer.code}</div>
+                        </div>
+                    `;
+                });
+                
+                if (filtered.length > 10) {
+                    html += `<div class="customer-item text-center text-muted" style="cursor: default;">
+                        <small>Và ${filtered.length - 10} kết quả khác...</small>
+                    </div>`;
+                }
+                
+                results.html(html).show();
+            } else {
+                results.html(`
+                    <div class="no-results">
+                        <i class="fas fa-search"></i>
+                        <p class="mb-0">Không tìm thấy khách hàng</p>
+                        <small>Thử tìm kiếm với từ khóa khác hoặc <a href="#" data-bs-toggle="modal" data-bs-target="#addCustomerModal" class="text-primary">thêm khách hàng mới</a></small>
+                    </div>
+                `).show();
+            }
+        }, 200);
+    });
+    
+    // Highlight search term in text
+    function highlightText(text, searchTerm) {
+        if (!searchTerm) return text;
+        const regex = new RegExp(`(${searchTerm})`, 'gi');
+        return text.replace(regex, '<mark class="bg-warning">$1</mark>');
+    }
+    
+    // Select customer from search results
+    $(document).on('click', '#customer_results .customer-item[data-id]', function(e) {
+        e.preventDefault();
+        const customerId = $(this).data('id');
+        if (customerId) {
+            selectCustomer(customerId);
+            $('#customer_search').val('');
+            $('#customer_results').hide();
         }
     });
     
-    // Select customer from search results
-    $(document).on('click', '#customer_results .list-group-item', function(e) {
-        e.preventDefault();
-        const customerId = $(this).data('id');
-        selectCustomer(customerId);
-        $('#customer_search').val('');
-        $('#customer_results').hide();
+    // Keyboard navigation
+    let selectedIndex = -1;
+    $('#customer_search').on('keydown', function(e) {
+        const results = $('#customer_results');
+        const items = results.find('.customer-item[data-id]');
+        
+        if (items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+            items.removeClass('active').eq(selectedIndex).addClass('active');
+            items[selectedIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            items.removeClass('active');
+            if (selectedIndex >= 0) {
+                items.eq(selectedIndex).addClass('active');
+                items[selectedIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        } else if (e.key === 'Enter' && selectedIndex >= 0) {
+            e.preventDefault();
+            const customerId = items.eq(selectedIndex).data('id');
+            if (customerId) {
+                selectCustomer(customerId);
+                $('#customer_search').val('');
+                results.hide();
+                selectedIndex = -1;
+            }
+        } else if (e.key === 'Escape') {
+            results.hide();
+            selectedIndex = -1;
+        }
     });
     
     // Click outside to close results
