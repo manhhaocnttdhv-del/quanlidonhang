@@ -183,9 +183,9 @@ class OrderController extends Controller
             'receiver_name' => 'required|string|max:255',
             'receiver_phone' => 'required|string|max:20',
             'receiver_address' => 'required|string',
-            'receiver_province' => 'nullable|string|max:255',
+            'receiver_province' => 'required|string|max:255',
             'receiver_district' => 'nullable|string|max:255',
-            'receiver_ward' => 'nullable|string|max:255',
+            'receiver_ward' => 'required|string|max:255',
             'item_type' => 'nullable|string|max:255',
             'weight' => 'required|numeric|min:0',
             'length' => 'nullable|numeric|min:0',
@@ -350,6 +350,7 @@ class OrderController extends Controller
             'receiver_address' => 'required|string',
             'receiver_province' => 'required|string',
             'receiver_district' => 'nullable|string',
+            'receiver_ward' => 'required|string|max:255',
             'item_type' => 'required|string|max:255',
             'weight' => 'required|numeric|min:0.1',
             'length' => 'nullable|numeric|min:0',
@@ -478,6 +479,15 @@ class OrderController extends Controller
             'driver_id' => 'nullable|exists:drivers,id',
         ]);
 
+        // Chỉ tạo OrderStatus mới nếu trạng thái thực sự thay đổi
+        $statusChanged = $order->status !== $validated['status'];
+        
+        // Kiểm tra trạng thái cuối cùng trong lịch sử để tránh trùng lặp
+        $lastStatus = $order->statuses()->latest('created_at')->first();
+        $isDuplicate = $lastStatus && 
+                       $lastStatus->status === $validated['status'] && 
+                       $lastStatus->created_at->gt(now()->subMinutes(1)); // Trong vòng 1 phút
+        
         $order->update([
             'status' => $validated['status'],
             'warehouse_id' => $validated['warehouse_id'] ?? $order->warehouse_id,
@@ -491,24 +501,27 @@ class OrderController extends Controller
             $order->update(['delivered_at' => now()]);
         }
 
-        OrderStatus::create([
-            'order_id' => $order->id,
-            'status' => $validated['status'],
-            'notes' => $validated['notes'] ?? null,
-            'location' => $validated['location'] ?? null,
-            'warehouse_id' => $validated['warehouse_id'] ?? null,
-            'driver_id' => $validated['driver_id'] ?? null,
-            'updated_by' => auth()->id(),
-        ]);
+        // Chỉ tạo OrderStatus mới khi trạng thái thay đổi và không phải trùng lặp
+        if ($statusChanged && !$isDuplicate) {
+            OrderStatus::create([
+                'order_id' => $order->id,
+                'status' => $validated['status'],
+                'notes' => $validated['notes'] ?? null,
+                'location' => $validated['location'] ?? null,
+                'warehouse_id' => $validated['warehouse_id'] ?? null,
+                'driver_id' => $validated['driver_id'] ?? null,
+                'updated_by' => auth()->id(),
+            ]);
+        }
 
         if ($request->expectsJson()) {
             return response()->json([
-                'message' => 'Trạng thái đơn hàng đã được cập nhật',
+                'message' => $statusChanged ? 'Trạng thái đơn hàng đã được cập nhật' : 'Đơn hàng đã được cập nhật',
                 'data' => $order->fresh(['statuses']),
             ]);
         }
 
-        return redirect()->back()->with('success', 'Trạng thái đơn hàng đã được cập nhật');
+        return redirect()->back()->with('success', $statusChanged ? 'Trạng thái đơn hàng đã được cập nhật' : 'Đơn hàng đã được cập nhật');
     }
 
     public function cancelOrder(Request $request, string $id)

@@ -102,21 +102,22 @@
                     
                     <div class="mb-3">
                         <label for="email" class="form-label">
-                            <i class="fas fa-envelope me-2"></i>Email
+                            <i class="fas fa-envelope me-2"></i>Email hoặc Số điện thoại
                         </label>
                         <input 
-                            type="email" 
+                            type="text" 
                             class="form-control @error('email') is-invalid @enderror" 
                             id="email" 
                             name="email" 
                             value="{{ old('email') }}" 
                             required 
                             autofocus
-                            placeholder="Nhập email của bạn"
+                            placeholder="Nhập email hoặc số điện thoại"
                         >
                         @error('email')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
+                        <small class="text-muted">Khách hàng có thể đăng nhập bằng email hoặc số điện thoại</small>
                     </div>
                     
                     <div class="mb-3">
@@ -143,17 +144,26 @@
                         </label>
                     </div>
                     
-                    <button type="submit" class="btn btn-primary btn-login w-100">
+                    <button type="submit" class="btn btn-primary btn-login w-100 mb-3">
                         <i class="fas fa-sign-in-alt me-2"></i>Đăng Nhập
                     </button>
+                    
+                    <div class="text-center">
+                        <a href="{{ route('customer.register') }}" class="btn btn-outline-primary w-100" style="border: 2px solid #667eea; color: #667eea; font-weight: 500;">
+                            <i class="fas fa-user-plus me-2"></i>Chưa có tài khoản? Đăng ký ngay
+                        </a>
+                    </div>
                 </form>
-                
-                <div class="mt-4 text-center">
-                    <small class="text-muted">
-                        <i class="fas fa-info-circle me-1"></i>
-                        Mặc định: admin@smartpost.com / password
-                    </small>
-                </div>
+{{--                 
+                <div class="mt-4">
+                    <div class="alert alert-info mb-0">
+                        <small>
+                            <strong><i class="fas fa-info-circle me-1"></i>Thông tin đăng nhập:</strong><br>
+                            <strong>Admin/Staff:</strong> admin@smartpost.com / password<br>
+                            <strong>Khách hàng:</strong> Email hoặc Số điện thoại / 123456 (mặc định)
+                        </small>
+                    </div>
+                </div> --}}
             </div>
         </div>
     </div>

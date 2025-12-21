@@ -55,7 +55,7 @@
                         </td>
                         <td>{{ $order->created_at->format('d/m/Y H:i') }}</td>
                         <td>
-                            <a href="{{ route('admin.orders.show', $order->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết">
+                            <a href="{{ route('admin.dispatch.show', $order->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết điều phối">
                                 <i class="fas fa-eye"></i>
                             </a>
                         </td>
@@ -164,7 +164,7 @@
                                     <i class="fas fa-warehouse me-1"></i>Đã về kho
                                 </span>
                                 @endif
-                                <a href="{{ route('admin.orders.show', $order->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết">
+                                <a href="{{ route('admin.dispatch.show', $order->id) }}" class="btn btn-sm btn-primary" title="Xem chi tiết điều phối">
                                     <i class="fas fa-eye"></i>
                                 </a>
                             </div>

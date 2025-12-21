@@ -94,29 +94,24 @@
                         <input type="text" name="receiver_phone" class="form-control" required value="{{ old('receiver_phone') }}">
                     </div>
                     <div class="row mb-3">
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <label class="form-label">Tỉnh/Thành <span class="text-danger">*</span></label>
                             <select name="receiver_province" id="receiver_province" class="form-select address-select" required>
                                 <option value="">-- Chọn Tỉnh/Thành --</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Quận/Huyện <span class="text-danger">*</span></label>
-                            <select name="receiver_district" id="receiver_district" class="form-select address-select" disabled required>
-                                <option value="">-- Chọn Quận/Huyện --</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <label class="form-label">Phường/Xã <span class="text-danger">*</span></label>
                             <select name="receiver_ward" id="receiver_ward" class="form-select address-select" disabled required>
-                                <option value="">-- Chọn Phường/Xã --</option>
+                                <option value="">-- Chọn Tỉnh/Thành trước --</option>
                             </select>
                         </div>
                     </div>
+                    <input type="hidden" name="receiver_district" id="receiver_district" value="">
                     <div class="mb-3">
-                        <label class="form-label">Địa chỉ chi tiết <span class="text-danger">*</span></label>
-                        <textarea name="receiver_address" id="receiver_address" class="form-control" rows="2" required placeholder="Nhập địa chỉ chi tiết sau khi chọn Tỉnh/Huyện/Xã" disabled>{{ old('receiver_address') }}</textarea>
-                        <small class="text-muted">Vui lòng chọn đầy đủ Tỉnh/Huyện/Xã trước khi nhập địa chỉ</small>
+                        <label class="form-label">Địa chỉ chi tiết (Số nhà, tên đường) <span class="text-danger">*</span></label>
+                        <textarea name="receiver_address" id="receiver_address" class="form-control" rows="2" required placeholder="Nhập địa chỉ chi tiết sau khi đã chọn Tỉnh/Thành và Phường/Xã" disabled>{{ old('receiver_address') }}</textarea>
+                        <small class="text-muted">Vui lòng nhập địa chỉ chi tiết sau khi đã chọn Tỉnh/Thành và Phường/Xã</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Kho vận chuyển đến <span class="text-danger">*</span></label>
@@ -286,35 +281,54 @@ $(document).ready(function() {
         });
     }
     
-    // Load districts for a province
-    function loadDistrictsForProvince(provinceName, districtSelectId) {
+    // Load wards for a province (load all wards from all districts)
+    function loadWardsForProvince(provinceName) {
         if (!vietnamAddresses) return;
         
-        const province = vietnamAddresses.provinces.find(p => p.name === provinceName);
-        const $districtSelect = $(districtSelectId);
+        const $wardSelect = $('#receiver_ward');
+        $wardSelect.prop('disabled', true).html('<option value="">Đang tải...</option>');
         
-        $districtSelect.prop('disabled', false).html('<option value="">-- Chọn Quận/Huyện --</option>');
+        const province = vietnamAddresses.provinces.find(p => p.name === provinceName);
         
         if (province && province.districts) {
+            // Collect all wards from all districts in this province
+            let allWards = [];
             province.districts.forEach(district => {
-                $districtSelect.append(`<option value="${district.name}">${district.name}</option>`);
+                if (district.wards && district.wards.length > 0) {
+                    district.wards.forEach(ward => {
+                        // Avoid duplicates
+                        if (!allWards.find(w => w.name === ward.name)) {
+                            allWards.push(ward);
+                        }
+                    });
+                }
             });
+            
+            // Sort wards by name
+            allWards.sort((a, b) => a.name.localeCompare(b.name));
+            
+            $wardSelect.html('<option value="">-- Chọn Phường/Xã --</option>');
+            allWards.forEach(ward => {
+                $wardSelect.append(`<option value="${ward.name}">${ward.name}</option>`);
+            });
+            
+            $wardSelect.prop('disabled', false);
+        } else {
+            $wardSelect.html('<option value="">Không có dữ liệu</option>');
+            $wardSelect.prop('disabled', true);
         }
     }
-    
     
     // Handle receiver province change
     $(document).on('change', '#receiver_province', function() {
         const provinceName = $(this).val();
-        const $districtSelect = $('#receiver_district');
         const $wardSelect = $('#receiver_ward');
         const $addressInput = $('#receiver_address');
         const $warehouseSelect = $('#to_warehouse_id');
         
-        // Reset and disable district, ward, address, and warehouse
-        $districtSelect.prop('disabled', true).html('<option value="">-- Chọn Quận/Huyện --</option>');
-        $wardSelect.prop('disabled', true).html('<option value="">-- Chọn Phường/Xã --</option>');
-        $addressInput.prop('disabled', true).val('').attr('placeholder', 'Nhập địa chỉ chi tiết sau khi chọn Tỉnh/Huyện/Xã');
+        // Reset and disable ward, address, and warehouse
+        $wardSelect.prop('disabled', true).html('<option value="">-- Chọn Tỉnh/Thành trước --</option>');
+        $addressInput.prop('disabled', true).val('').attr('placeholder', 'Nhập địa chỉ chi tiết sau khi đã chọn Tỉnh/Thành và Phường/Xã');
         $warehouseSelect.prop('disabled', true).html('<option value="">-- Chọn Tỉnh/Thành trước --</option>');
         
         if (!provinceName || !vietnamAddresses) {
@@ -322,10 +336,11 @@ $(document).ready(function() {
             return;
         }
         
+        // Load wards for this province
+        loadWardsForProvince(provinceName);
+        
         // Load warehouses for this province
         loadWarehousesForProvince(provinceName);
-        
-        loadDistrictsForProvince(provinceName, '#receiver_district');
         
         // Trigger shipping fee calculation
         setTimeout(function() {
@@ -381,37 +396,6 @@ $(document).ready(function() {
         });
     }
     
-    // Handle receiver district change
-    $(document).on('change', '#receiver_district', function() {
-        const districtName = $(this).val();
-        const $wardSelect = $('#receiver_ward');
-        const $addressInput = $('#receiver_address');
-        const $provinceSelect = $('#receiver_province');
-        const provinceName = $provinceSelect.val();
-        
-        // Reset ward and disable address
-        $wardSelect.prop('disabled', true).html('<option value="">-- Chọn Phường/Xã --</option>');
-        $addressInput.prop('disabled', true).val('').attr('placeholder', 'Nhập địa chỉ chi tiết sau khi chọn Tỉnh/Huyện/Xã');
-        
-        if (!districtName || !provinceName || !vietnamAddresses) {
-            calculateShippingFee();
-            return;
-        }
-        
-        const province = vietnamAddresses.provinces.find(p => p.name === provinceName);
-        if (province) {
-            const district = province.districts.find(d => d.name === districtName);
-            if (district && district.wards) {
-                $wardSelect.prop('disabled', false);
-                district.wards.forEach(ward => {
-                    $wardSelect.append(`<option value="${ward.name}">${ward.name}</option>`);
-                });
-            }
-        }
-        
-        calculateShippingFee();
-    });
-    
     // Handle receiver ward change - enable address input
     $(document).on('change', '#receiver_ward', function() {
         const wardName = $(this).val();
@@ -421,7 +405,7 @@ $(document).ready(function() {
             // Enable address input when ward is selected
             $addressInput.prop('disabled', false).attr('placeholder', 'Nhập địa chỉ chi tiết (số nhà, tên đường, ...)');
         } else {
-            $addressInput.prop('disabled', true).val('').attr('placeholder', 'Nhập địa chỉ chi tiết sau khi chọn Tỉnh/Huyện/Xã');
+            $addressInput.prop('disabled', true).val('').attr('placeholder', 'Nhập địa chỉ chi tiết sau khi đã chọn Tỉnh/Thành và Phường/Xã');
         }
         
         calculateShippingFee();
@@ -597,7 +581,7 @@ $(document).ready(function() {
         const fromProvince = 'Nghệ An'; // Always from Nghệ An
         const fromDistrict = $('#sender_district').val() || '';
         const toProvince = $('#receiver_province').val() || '';
-        const toDistrict = $('#receiver_district').val() || '';
+        const toDistrict = ''; // Không dùng district nữa
         
         // Check if receiver province is selected
         if (!toProvince) {
@@ -679,7 +663,7 @@ $(document).ready(function() {
         });
     }
     
-    $('#weight, #cod_amount, #service_type, #receiver_province, #receiver_district, #receiver_ward').on('change', calculateShippingFee);
+    $('#weight, #cod_amount, #service_type, #receiver_province, #receiver_ward').on('change', calculateShippingFee);
 });
 </script>
 @endpush

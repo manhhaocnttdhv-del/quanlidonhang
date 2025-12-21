@@ -135,19 +135,60 @@ class DispatchController extends Controller
         $orders = Order::whereIn('id', $orderIds)->get();
 
         foreach ($orders as $order) {
+            $oldDriverId = $order->pickup_driver_id;
+            $oldStatus = $order->status;
+            $oldScheduledAt = $order->pickup_scheduled_at;
+            $isDriverChanged = $oldDriverId != $validated['driver_id'];
+            
+            // Lấy tên tài xế cũ trước khi cập nhật
+            $oldDriverName = 'N/A';
+            if ($oldDriverId) {
+                $oldDriver = Driver::find($oldDriverId);
+                $oldDriverName = $oldDriver ? $oldDriver->name : 'N/A';
+            }
+            
+            // Cập nhật tài xế và thời gian
+            $newScheduledAt = $validated['pickup_scheduled_at'] ?? $oldScheduledAt ?? now();
             $order->update([
                 'pickup_driver_id' => $validated['driver_id'],
-                'status' => 'pickup_pending',
-                'pickup_scheduled_at' => $validated['pickup_scheduled_at'] ?? now(),
+                'pickup_scheduled_at' => $newScheduledAt,
             ]);
-
-            OrderStatus::create([
-                'order_id' => $order->id,
-                'status' => 'pickup_pending',
-                'notes' => "Đã phân công tài xế {$driver->name} lấy hàng",
-                'driver_id' => $validated['driver_id'],
-                'updated_by' => auth()->id(),
-            ]);
+            
+            // Chỉ cập nhật status nếu đơn hàng đang ở pending
+            if ($oldStatus === 'pending') {
+                $order->update(['status' => 'pickup_pending']);
+            }
+            
+            // Tạo OrderStatus với ghi chú phù hợp
+            if ($oldStatus === 'pending') {
+                // Phân công tài xế lần đầu
+                $notes = "Đã phân công tài xế {$driver->name} lấy hàng";
+                $statusToRecord = 'pickup_pending';
+                $shouldCreateStatus = true;
+            } elseif ($isDriverChanged) {
+                // Thay đổi tài xế
+                $notes = "Đã thay đổi tài xế từ {$oldDriverName} sang {$driver->name}";
+                $statusToRecord = $oldStatus; // Giữ nguyên trạng thái hiện tại
+                $shouldCreateStatus = true;
+            } elseif ($oldScheduledAt && $newScheduledAt != $oldScheduledAt) {
+                // Chỉ cập nhật thời gian
+                $notes = "Đã cập nhật thời gian lấy hàng dự kiến";
+                $statusToRecord = $oldStatus;
+                $shouldCreateStatus = true;
+            } else {
+                $shouldCreateStatus = false;
+            }
+            
+            // Chỉ tạo OrderStatus nếu có thay đổi thực sự
+            if ($shouldCreateStatus) {
+                OrderStatus::create([
+                    'order_id' => $order->id,
+                    'status' => $statusToRecord,
+                    'notes' => $notes,
+                    'driver_id' => $validated['driver_id'],
+                    'updated_by' => auth()->id(),
+                ]);
+            }
         }
 
         if ($request->expectsJson()) {
@@ -173,18 +214,29 @@ class DispatchController extends Controller
         ]);
 
         if ($validated['status'] === 'picking_up') {
-            // Tài xế đang đi lấy hàng
+            // Tài xế đang đi lấy hàng - Chỉ tạo OrderStatus nếu trạng thái thay đổi
+            $statusChanged = $order->status !== 'picking_up';
+            
+            // Kiểm tra trạng thái cuối cùng trong lịch sử để tránh trùng lặp
+            $lastStatus = $order->statuses()->latest('created_at')->first();
+            $isDuplicate = $lastStatus && 
+                           $lastStatus->status === 'picking_up' && 
+                           $lastStatus->created_at->gt(now()->subMinutes(1)); // Trong vòng 1 phút
+            
             $order->update([
                 'status' => 'picking_up',
             ]);
 
-            OrderStatus::create([
-                'order_id' => $order->id,
-                'status' => 'picking_up',
-                'notes' => $validated['notes'] ?? 'Tài xế đang đi lấy hàng',
-                'driver_id' => $order->pickup_driver_id,
-                'updated_by' => auth()->id(),
-            ]);
+            // Chỉ tạo OrderStatus mới khi trạng thái thay đổi và không phải trùng lặp
+            if ($statusChanged && !$isDuplicate) {
+                OrderStatus::create([
+                    'order_id' => $order->id,
+                    'status' => 'picking_up',
+                    'notes' => $validated['notes'] ?? 'Tài xế đang đi lấy hàng',
+                    'driver_id' => $order->pickup_driver_id,
+                    'updated_by' => auth()->id(),
+                ]);
+            }
         } elseif ($validated['status'] === 'picked_up') {
             // Tài xế đã lấy hàng - Tự động nhập kho của tài xế
             $driver = Driver::with('warehouse')->find($order->pickup_driver_id);
@@ -346,5 +398,42 @@ class DispatchController extends Controller
         $drivers = $query->get();
 
         return response()->json($drivers);
+    }
+
+    /**
+     * Show order details for dispatch (pickup coordination)
+     */
+    public function show(Request $request, string $id)
+    {
+        $order = Order::with([
+            'customer',
+            'pickupDriver',
+            'deliveryDriver',
+            'warehouse',
+            'toWarehouse',
+            'statuses' => function($q) {
+                $q->orderBy('created_at', 'desc');
+            }
+        ])->findOrFail($id);
+
+        $user = auth()->user();
+        
+        // Warehouse admin chỉ xem đơn hàng của kho mình
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            if ($order->warehouse_id != $user->warehouse_id && 
+                $order->to_warehouse_id != $user->warehouse_id &&
+                !($order->pickupDriver && $order->pickupDriver->warehouse_id == $user->warehouse_id)) {
+                abort(403, 'Bạn không có quyền xem đơn hàng này');
+            }
+        }
+
+        // Lấy tài xế theo kho
+        $driversQuery = Driver::where('is_active', true);
+        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+            $driversQuery->where('warehouse_id', $user->warehouse_id);
+        }
+        $drivers = $driversQuery->get();
+
+        return view('admin.dispatch.show', compact('order', 'drivers'));
     }
 }

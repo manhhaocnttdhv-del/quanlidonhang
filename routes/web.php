@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\OrderController;
@@ -21,15 +22,98 @@ use App\Http\Controllers\RouteController;
 */
 
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\CustomerOrderController;
 
 Route::get('/', function () {
-    return redirect()->route('admin.dashboard');
+    // Check customer guard first
+    if (Auth::guard('customer')->check()) {
+        return redirect()->route('customer.dashboard');
+    }
+    
+    // Check web guard (admin/staff)
+    if (Auth::guard('web')->check()) {
+        $user = Auth::guard('web')->user();
+        if ($user->isCustomer()) {
+            return redirect()->route('customer.dashboard');
+        }
+        return redirect()->route('admin.dashboard');
+    }
+    
+    return redirect()->route('login');
 });
 
 // Authentication Routes
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login']);
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
+
+// Customer Routes
+// Customer Registration (public routes)
+Route::prefix('customer')->name('customer.')->group(function () {
+    Route::get('/register', [CustomerOrderController::class, 'showRegisterForm'])->name('register');
+    Route::post('/register', [CustomerOrderController::class, 'register'])->name('register.submit');
+    
+    // Public API routes (có thể truy cập khi chưa đăng nhập)
+    Route::get('/api/warehouses', function (\Illuminate\Http\Request $request) {
+        $province = $request->get('province');
+        
+        if (!$province) {
+            return response()->json(['error' => 'province is required'], 400);
+        }
+        
+        // Normalize province name để match với database - copy y hệt từ admin API
+        // "Thành phố Hồ Chí Minh" -> "Hồ Chí Minh"
+        // "Thành phố Hà Nội" -> "Hà Nội"
+        // "Tỉnh Đà Nẵng" -> "Đà Nẵng"
+        $normalizedProvince = $province;
+        $normalizedProvince = preg_replace('/^Thành phố\s+/', '', $normalizedProvince);
+        $normalizedProvince = preg_replace('/^Tỉnh\s+/', '', $normalizedProvince);
+        $normalizedProvince = trim($normalizedProvince);
+        
+        // Tìm kho với tên tỉnh đã normalize hoặc tên gốc - copy y hệt từ admin API
+        $warehouses = \App\Models\Warehouse::where('is_active', true)
+            ->where(function($query) use ($province, $normalizedProvince) {
+                $query->where('province', $province)
+                      ->orWhere('province', $normalizedProvince)
+                      ->orWhere('province', 'like', '%' . $normalizedProvince . '%');
+            })
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'address', 'province']);
+        
+        return response()->json($warehouses);
+    })->name('api.warehouses');
+});
+
+Route::prefix('customer')->name('customer.')->middleware(['customer'])->group(function () {
+    Route::get('/dashboard', [CustomerOrderController::class, 'dashboard'])->name('dashboard');
+    Route::get('/orders', [CustomerOrderController::class, 'index'])->name('orders.index');
+    Route::get('/orders/create', [CustomerOrderController::class, 'create'])->name('orders.create');
+    Route::post('/orders', [CustomerOrderController::class, 'store'])->name('orders.store');
+    Route::get('/orders/{id}', [CustomerOrderController::class, 'show'])->name('orders.show');
+    
+    // API routes for customer
+    Route::get('/api/wards', function (\Illuminate\Http\Request $request) {
+        $provinceCode = $request->get('province_code');
+        
+        if (!$provinceCode) {
+            return response()->json(['error' => 'province_code is required'], 400);
+        }
+        
+        $wards = \App\Models\Ward::where('province_code', $provinceCode)
+            ->orderBy('ward_name')
+            ->get(['ward_code', 'ward_name', 'province_code']);
+        
+        return response()->json($wards);
+    })->name('api.wards');
+    
+    Route::get('/api/provinces', function () {
+        $provinces = \App\Models\Province::orderBy('name')->get(['province_code', 'name']);
+        return response()->json($provinces);
+    })->name('api.provinces');
+    
+    // API route for calculating shipping fee
+    Route::post('/api/shipping-fees/calculate', [CustomerOrderController::class, 'calculateShippingFee'])->name('api.shipping-fees.calculate');
+});
 
 // Admin Routes
 Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
@@ -58,6 +142,7 @@ Route::prefix('admin')->name('admin.')->middleware('auth')->group(function () {
     
     // Dispatch
     Route::get('/dispatch', [DispatchController::class, 'index'])->name('dispatch.index');
+    Route::get('/dispatch/{id}', [DispatchController::class, 'show'])->name('dispatch.show');
     Route::post('/dispatch/assign-pickup-driver', [DispatchController::class, 'assignPickupDriver'])->name('dispatch.assign-pickup-driver');
     Route::post('/dispatch/auto-assign-pickup-driver', [DispatchController::class, 'autoAssignPickupDriver'])->name('dispatch.auto-assign-pickup-driver');
     Route::post('/dispatch/update-pickup-status/{id}', [DispatchController::class, 'updatePickupStatus'])->name('dispatch.update-pickup-status');

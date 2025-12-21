@@ -97,4 +97,20 @@ class User extends Authenticatable
         }
         return $this->isAdminOfWarehouse($warehouseId);
     }
+
+    /**
+     * Check if user is customer
+     */
+    public function isCustomer(): bool
+    {
+        return $this->role === 'customer';
+    }
+
+    /**
+     * Get customer model associated with this user
+     */
+    public function customer()
+    {
+        return $this->hasOne(Customer::class);
+    }
 }

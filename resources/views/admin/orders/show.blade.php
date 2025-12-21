@@ -118,37 +118,6 @@
     </div>
     
     <div class="col-md-4">
-        <div class="card mb-3">
-            <div class="card-header">
-                <h6 class="mb-0">Cập nhật trạng thái</h6>
-            </div>
-            <div class="card-body">
-                <form action="{{ route('admin.orders.update-status', $order->id) }}" method="POST">
-                    @csrf
-                    <div class="mb-3">
-                        <label class="form-label">Trạng thái</label>
-                        <select name="status" class="form-select" required>
-                            <option value="pending" {{ $order->status === 'pending' ? 'selected' : '' }}>Chờ xử lý</option>
-                            <option value="pickup_pending" {{ $order->status === 'pickup_pending' ? 'selected' : '' }}>Chờ lấy hàng</option>
-                            <option value="picking_up" {{ $order->status === 'picking_up' ? 'selected' : '' }}>Đang lấy hàng</option>
-                            <option value="picked_up" {{ $order->status === 'picked_up' ? 'selected' : '' }}>Đã lấy hàng</option>
-                            <option value="in_warehouse" {{ $order->status === 'in_warehouse' ? 'selected' : '' }}>Đã nhập kho</option>
-                            <option value="in_transit" {{ $order->status === 'in_transit' ? 'selected' : '' }}>Đang vận chuyển</option>
-                            <option value="out_for_delivery" {{ $order->status === 'out_for_delivery' ? 'selected' : '' }}>Đang giao hàng</option>
-                            <option value="delivered" {{ $order->status === 'delivered' ? 'selected' : '' }}>Đã giao hàng</option>
-                            <option value="failed" {{ $order->status === 'failed' ? 'selected' : '' }}>Giao hàng thất bại</option>
-                            <option value="returned" {{ $order->status === 'returned' ? 'selected' : '' }}>Đã hoàn</option>
-                        </select>
-                        <small class="text-muted">Trạng thái hiện tại: <strong>{{ $order->status }}</strong></small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Ghi chú</label>
-                        <textarea name="notes" class="form-control" rows="3"></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100">Cập nhật</button>
-                </form>
-            </div>
-        </div>
         
         <div class="card">
             <div class="card-header">
