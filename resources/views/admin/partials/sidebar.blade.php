@@ -48,7 +48,7 @@
         
         @elseif($isWarehouseAdmin)
         {{-- ===== MENU CHO WAREHOUSE ADMIN (ADMIN KHO) ===== --}}
-        <hr class="text-white-50 my-2">s
+        <hr class="text-white-50 my-2">
         
         <a class="nav-link {{ request()->routeIs('admin.customers.*') ? 'active' : '' }}" href="{{ route('admin.customers.index') }}">
             <i class="fas fa-users"></i>

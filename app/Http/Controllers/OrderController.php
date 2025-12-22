@@ -14,158 +14,93 @@ class OrderController extends Controller
      * Display a listing of the resource.
      */
     public function index(Request $request)
-    {
-        $user = auth()->user();
-        $query = Order::with([
-            'customer', 
-            'pickupDriver', 
-            'deliveryDriver', 
-            'route', 
-            'warehouse',
-            'statuses' => function($q) {
-                $q->orderBy('created_at', 'desc');
-            }
-        ]);
+{
+    $user = auth()->user();
 
-        // Warehouse admin chỉ xem đơn hàng liên quan đến kho của mình
-        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
-            $query->where(function($q) use ($user) {
-                // Đơn hàng trong kho của mình
-                $q->where('warehouse_id', $user->warehouse_id)
-                  // Đơn hàng sẽ được chuyển đến kho của mình (to_warehouse_id) - BẤT KỂ STATUS NÀO
-                  // QUAN TRỌNG: Ưu tiên to_warehouse_id, nếu đã set thì chỉ hiển thị ở kho đó
-                  ->orWhere('to_warehouse_id', $user->warehouse_id)
-                  // Đơn hàng đã giao trong khu vực kho này (chỉ khi không có to_warehouse_id hoặc to_warehouse_id trỏ đến kho này)
-                  ->orWhere(function($subQ) use ($user) {
-                      $subQ->where('status', 'delivered')
-                           ->where(function($subSubQ) use ($user) {
-                               // Chỉ hiển thị nếu to_warehouse_id là NULL hoặc trỏ đến kho này
-                               $subSubQ->whereNull('to_warehouse_id')
-                                      ->orWhere('to_warehouse_id', $user->warehouse_id);
-                           })
-                           ->where('receiver_province', $user->warehouse->province ?? '');
-                  })
-                  // Đơn hàng đang được tài xế của kho mình lấy (pickup_pending, picking_up, picked_up)
-                  ->orWhere(function($subQ) use ($user) {
-                      $subQ->whereIn('status', ['pickup_pending', 'picking_up', 'picked_up'])
-                           ->whereHas('pickupDriver', function($driverQuery) use ($user) {
-                               $driverQuery->where('warehouse_id', $user->warehouse_id);
-                           });
-                  })
-                  // Đơn hàng có receiver_province trùng với tỉnh của kho mình NHƯNG CHỈ KHI to_warehouse_id là NULL
-                  // (để hiển thị đơn hàng chưa chọn kho đích - chỉ áp dụng cho đơn hàng cũ chưa có to_warehouse_id)
-                  ->orWhere(function($subQ) use ($user) {
-                      if ($user->warehouse && $user->warehouse->province) {
-                          $subQ->where('receiver_province', $user->warehouse->province)
-                               ->whereNull('to_warehouse_id') // CHỈ khi to_warehouse_id là NULL
-                               ->whereIn('status', ['pending', 'pickup_pending', 'picking_up', 'picked_up', 'in_transit']);
-                      }
-                  });
-            });
+    $query = Order::with([
+        'customer',
+        'pickupDriver',
+        'deliveryDriver',
+        'route',
+        'warehouse',
+        'statuses' => function ($q) {
+            $q->orderBy('created_at', 'desc');
         }
+    ]);
 
-        // Filters
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->has('tracking_number')) {
-            $query->where('tracking_number', 'like', '%' . $request->tracking_number . '%');
-        }
-
-        if ($request->has('customer_id')) {
-            $query->where('customer_id', $request->customer_id);
-        }
-
-        if ($request->has('date_from')) {
-            $query->whereDate('created_at', '>=', $request->date_from);
-        }
-
-        if ($request->has('date_to')) {
-            $query->whereDate('created_at', '<=', $request->date_to);
-        }
-
-        $orders = $query->orderBy('created_at', 'desc')->paginate(20);
-
-        if ($request->expectsJson()) {
-            return response()->json($orders);
-        }
-
-        return view('admin.orders.index', compact('orders'));
+    // Warehouse admin filter
+    if ($user->isWarehouseAdmin() && $user->warehouse_id) {
+        $query->where(function ($q) use ($user) {
+            $q->where('warehouse_id', $user->warehouse_id)
+              ->orWhere('to_warehouse_id', $user->warehouse_id)
+              ->orWhere(function ($subQ) use ($user) {
+                  $subQ->where('status', 'delivered')
+                       ->where(function ($subSubQ) use ($user) {
+                           $subSubQ->whereNull('to_warehouse_id')
+                                   ->orWhere('to_warehouse_id', $user->warehouse_id);
+                       })
+                       ->where('receiver_province', $user->warehouse->province ?? '');
+              })
+              ->orWhere(function ($subQ) use ($user) {
+                  $subQ->whereIn('status', ['pickup_pending', 'picking_up', 'picked_up'])
+                       ->whereHas('pickupDriver', function ($driverQuery) use ($user) {
+                           $driverQuery->where('warehouse_id', $user->warehouse_id);
+                       });
+              })
+              ->orWhere(function ($subQ) use ($user) {
+                  if ($user->warehouse && $user->warehouse->province) {
+                      $subQ->where('receiver_province', $user->warehouse->province)
+                           ->whereNull('to_warehouse_id')
+                           ->whereIn('status', [
+                               'pending',
+                               'pickup_pending',
+                               'picking_up',
+                               'picked_up',
+                               'in_transit'
+                           ]);
+                  }
+              });
+        });
     }
-    
-    public function create()
-    {
-        $user = auth()->user();
-        
-        // Load customers - Warehouse admin chỉ xem khách hàng của kho mình
-        $customersQuery = \App\Models\Customer::where('is_active', true);
-        
-        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
-            $customersQuery->where('warehouse_id', $user->warehouse_id);
-        }
-        
-        $customers = $customersQuery->orderBy('name')->get();
-        
-        // Lấy kho của user (nếu là warehouse admin) hoặc kho mặc định
-        $warehouse = null;
-        
-        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
-            $warehouse = \App\Models\Warehouse::find($user->warehouse_id);
-        }
-        
-        if (!$warehouse) {
-            $warehouse = \App\Models\Warehouse::getDefaultWarehouse();
-        }
-        
-        return view('admin.orders.create', compact('customers', 'warehouse'));
+
+    /* =======================
+       FILTERS (FIXED)
+    ======================= */
+
+    if ($request->filled('status')) {
+        $query->where('status', $request->status);
     }
-    
-    public function edit($id)
-    {
-        $order = Order::with(['warehouse', 'toWarehouse'])->findOrFail($id);
-        
-        $user = auth()->user();
-        
-        // Load active customers for dropdown - Warehouse admin chỉ xem khách hàng của kho mình
-        $customersQuery = \App\Models\Customer::where('is_active', true);
-        
-        if ($user->isWarehouseAdmin() && $user->warehouse_id) {
-            $customersQuery->where('warehouse_id', $user->warehouse_id);
-        }
-        
-        $customers = $customersQuery->orderBy('name')->get();
-            
-        // Load all warehouses for dropdown
-        $warehouses = \App\Models\Warehouse::where('is_active', true)
-            ->orderBy('name')
-            ->get();
-            
-        // Load provinces from JSON file
-        $provinces = [];
-        $addressesPath = public_path('data/vietnam-addresses-full.json');
-        
-        if (file_exists($addressesPath)) {
-            $addressData = json_decode(file_get_contents($addressesPath), true);
-            
-            // Extract provinces from the 'provinces' key
-            if (isset($addressData['provinces']) && is_array($addressData['provinces'])) {
-                $provinces = array_map(function($province) {
-                    return [
-                        'name' => $province['name'] ?? '',
-                        'code' => $province['code'] ?? ''
-                    ];
-                }, $addressData['provinces']);
-                
-                // Sort provinces by name
-                usort($provinces, function($a, $b) {
-                    return strcmp($a['name'], $b['name']);
-                });
-            }
-        }
-        
-        return view('admin.orders.edit', compact('order', 'customers', 'warehouses', 'provinces'));
+
+    if ($request->filled('tracking_number')) {
+        $query->where('tracking_number', 'like', '%' . $request->tracking_number . '%');
     }
+
+    if ($request->filled('customer_id')) {
+        $query->where('customer_id', $request->customer_id);
+    }
+
+    // Date filter (chuẩn nghiệp vụ)
+    if ($request->filled('date_from') || $request->filled('date_to')) {
+        $from = $request->filled('date_from')
+            ? $request->date_from . ' 00:00:00'
+            : '1970-01-01 00:00:00';
+
+        $to = $request->filled('date_to')
+            ? $request->date_to . ' 23:59:59'
+            : now()->endOfDay();
+
+        $query->whereBetween('created_at', [$from, $to]);
+    }
+
+    $orders = $query->orderBy('created_at', 'desc')->paginate(20);
+
+    if ($request->expectsJson()) {
+        return response()->json($orders);
+    }
+
+    return view('admin.orders.index', compact('orders'));
+}
+
 
     /**
      * Store a newly created resource in storage.
