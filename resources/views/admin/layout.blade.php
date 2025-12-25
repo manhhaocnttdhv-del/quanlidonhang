@@ -194,26 +194,26 @@
             }
         });
         
-        // Initialize DataTables
-        $(document).ready(function() {
-            // Only initialize DataTables for tables that have data (no colspan rows)
-            $('.data-table').each(function() {
-                const $table = $(this);
-                const $tbody = $table.find('tbody');
-                const hasData = $tbody.find('tr').length > 0 && 
-                               !$tbody.find('tr').first().find('td[colspan]').length;
+        // // Initialize DataTables
+        // $(document).ready(function() {
+        //     // Only initialize DataTables for tables that have data (no colspan rows)
+        //     $('.data-table').each(function() {
+        //         const $table = $(this);
+        //         const $tbody = $table.find('tbody');
+        //         const hasData = $tbody.find('tr').length > 0 && 
+        //                        !$tbody.find('tr').first().find('td[colspan]').length;
                 
-                if (hasData) {
-                    $table.DataTable({
-                        language: {
-                            url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/vi.json'
-                        },
-                        responsive: true,
-                        pageLength: 25
-                    });
-                }
-            });
-        });
+        //         if (hasData) {
+        //             $table.DataTable({
+        //                 language: {
+        //                     url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/vi.json'
+        //                 },
+        //                 responsive: true,
+        //                 pageLength: 25
+        //             });
+        //         }
+        //     });
+        // });
     </script>
     
     @stack('scripts')
