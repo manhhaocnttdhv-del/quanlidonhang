@@ -7,17 +7,6 @@
     </div>
     
     <div class="d-flex align-items-center gap-3">
-        <!-- <div class="dropdown">
-            <button class="btn btn-link text-dark text-decoration-none dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                <i class="fas fa-bell"></i>
-                <span class="badge bg-danger">3</span>
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end">
-                <li><h6 class="dropdown-header">Thông báo</h6></li>
-                <li><a class="dropdown-item" href="#">Đơn hàng mới</a></li>
-                <li><a class="dropdown-item" href="#">Khiếu nại cần xử lý</a></li>
-            </ul>
-        </div> -->
         
         <div class="dropdown">
             <button class="btn btn-link text-dark text-decoration-none dropdown-toggle" type="button" data-bs-toggle="dropdown">
@@ -25,9 +14,9 @@
                 {{ auth()->user()->name ?? 'Admin' }}
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-                <!-- <li><a class="dropdown-item" href="#"><i class="fas fa-user me-2"></i> Hồ sơ</a></li>
-                <li><a class="dropdown-item" href="#"><i class="fas fa-cog me-2"></i> Cài đặt</a></li> -->
-                <!-- <li><hr class="dropdown-divider"></li> -->
+                <li><a class="dropdown-item" href="#"><i class="fas fa-user me-2"></i> Hồ sơ</a></li>
+                <li><a class="dropdown-item" href="#"><i class="fas fa-cog me-2"></i> Cài đặt</a></li>
+                <li><hr class="dropdown-divider"></li>
                 <li>
                     <form method="POST" action="{{ route('logout') }}" id="logoutForm">
                         @csrf
